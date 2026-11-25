@@ -3,9 +3,9 @@
 A small Android app that makes the official YouTube app less of a time sink.
 You choose what it blocks:
 
-- **Shorts.** The Shorts tab and the Shorts rows in your feeds are covered
-  with plain boxes, so you can't see or tap them. If a Short opens anyway
-  (for example from a link), it presses **Back** for you.
+- **Shorts.** The Shorts tab is covered with a plain box, so you can't tap
+  it. Shorts rows in feeds and search results stay visible, but if you open a
+  Short (from a row or a link), it presses **Back** for you.
 - **Home feed** (the recommendations), optional. When YouTube shows Home,
   the feed is covered with a blank "Home feed blocked" panel. Then the only
   ways to find videos are **Subscriptions**, **Search** and the **You** tab
@@ -40,27 +40,25 @@ what to cover (`OverlayManager.kt` draws the boxes):
 | What | How it's found | What happens |
 |------|----------------|--------------|
 | Shorts tab | The bottom-bar tab labelled "Shorts" | Covered |
-| Shorts rows in feeds | A "Shorts" heading (the row is covered), views whose ID contains `reel`/`shorts`, and items described as "… play Short" | Covered |
+| Shorts rows in feeds | – | Left alone (boxes couldn't keep up with scrolling). Opening one triggers the next row. |
 | Home feed (if ticked) | The bottom-bar **Home** tab is selected **and** the top bar has no back arrow or search box. (YouTube keeps Home selected on search results and channels opened from Home, but those have a back arrow.) | Everything between the top bar and the bottom bar is covered. Search, search results, the top bar and the tabs stay usable. |
-| Shorts player | A view ≥70% wide and ≥60% tall whose ID contains `reel`/`shorts`, or the bottom-bar Shorts tab is selected | Presses **Back** |
+| Shorts player | A view ≥70% wide and ≥60% tall whose ID contains `reel`/`shorts` (on the Home feed: ≥85% tall), or the bottom-bar Shorts tab is selected | Presses **Back** |
 
 Safety rules for Back, so it can't fight you:
 
-- It **never** presses Back on the Home feed. (On YouTube, Back
-  on Home scrolls to the top and then closes the app.)
+- On the Home feed it only presses Back for a Shorts player that fills the
+  screen. (On YouTube, Back on Home scrolls to the top and then closes the app.)
 - At most once every 1.2 s.
 - **Loop guard:** after 3 Backs within 10 s it stops pressing Back for 30 s,
   and writes that in *Recent activity*.
 
-The boxes may lag a split second behind while you scroll, and scrolling
-can't start on a box (start the swipe somewhere else).
 
 ### The main screen
 
 | Control | What it does |
 |---------|--------------|
 | **Blocker on** | Main switch. Off = nothing is blocked. |
-| **Shorts** ☑ | Cover Shorts / close the Shorts player (on by default). |
+| **Shorts** ☑ | Cover the Shorts tab / close the Shorts player (on by default). |
 | **Home feed** ☐ | Cover the Home feed (off by default). |
 | **Debug mode** | Saves a description of the last YouTube screen (section 7). |
 | **Recent activity** | The last 30 things the blocker did (Back presses and why, loop guard, covering). |
@@ -298,7 +296,7 @@ With the service on, **Blocker on** switched on and **Shorts** ticked:
 | Try this | Expected |
 |----------|----------|
 | Open YouTube | The Shorts tab in the bottom bar is a blank box and can't be tapped |
-| Scroll Home / Subscriptions past a Shorts row | The row is covered with a "Shorts hidden" box |
+| Tap a Short in a Shorts row (Home, Subscriptions, search) | It closes again, with a "Shorts blocked" toast |
 | Open a Shorts link (`youtube.com/shorts/…`) from another app | Closed with a "Shorts blocked" toast. Back may close YouTube if the Short was the first screen. |
 | Scroll, tap Subscriptions, play a normal video, search, open You | Everything works normally. No jumping to the top. |
 | Turn **Blocker on** off in the app, go back to YouTube | All boxes are gone |
@@ -309,7 +307,7 @@ Now tick **Home feed** too:
 |----------|----------|
 | Open YouTube on Home | The feed is covered by "Home feed blocked"; the top bar and tabs still work |
 | Tap **Subscriptions**, **Search**, **You** | Works normally |
-| Search for something | The results are visible (Shorts in them are covered) |
+| Search for something | The results are visible |
 | Open a channel and tap its own "Home" tab | Works normally (it's not the bottom bar) |
 
 If something misbehaves, open Shorts Blocker and look at **Recent activity**.
@@ -325,7 +323,7 @@ screen is made of so you can fix it.
 
 1. In Shorts Blocker, turn on **Debug mode**.
 2. Open YouTube and go to the screen that's wrong (for example a Shorts row
-   that isn't covered). Wait 2–3 seconds.
+   that isn't blocked). Wait 2–3 seconds.
 3. Switch back to Shorts Blocker, tap **Share screen info**, and send it to
    yourself (notes, email, chat). It contains the recent activity and a list
    of the views that were on that screen.

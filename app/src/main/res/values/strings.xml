@@ -3,13 +3,13 @@
 <resources>
     <string name="app_name">Shorts Blocker</string>
 
-    <string name="service_description">Works only in the YouTube app. It covers the Shorts tab and Shorts rows with plain boxes, presses Back if a Short opens anyway and, if you choose, covers the Home feed. Other apps are ignored (it only notices when YouTube goes to the background). It has no internet access.</string>
+    <string name="service_description">Works only in the YouTube app. It covers the Shorts tab with a plain box, presses Back if a Short opens and, if you choose, covers the Home feed. Other apps are ignored (it only notices when YouTube goes to the background). It has no internet access.</string>
 
     <string name="how_to">How to turn it on:\n1. Tap “Open Accessibility Settings”.\n2. Find “Shorts Blocker” (often under “Downloaded apps” or “Installed apps”) and switch it on.\n3. If the switch is greyed out (Android 13+), tap “Open App Info”, then ⋮ (top right) → “Allow restricted settings”, and try step 2 again.</string>
 
     <string name="blocking_switch">Blocker on</string>
     <string name="what_to_block">What to block</string>
-    <string name="block_shorts">Shorts (tab, Shorts rows and player)</string>
+    <string name="block_shorts">Shorts (tab and player)</string>
     <string name="block_home">Home feed (recommendations)</string>
     <string name="block_home_hint">Home shows a blank “Home feed blocked” panel. Search, Subscriptions, History, Watch later and playlists still work.</string>
     <string name="debug_switch">Debug mode (saves screen info you can share)</string>
@@ -22,7 +22,6 @@
     <string name="privacy">No internet permission, no analytics, no data collection. Recent activity and screen info stay on your phone unless you share them.</string>
 
     <string name="overlay_home">Home feed blocked\nUse Subscriptions, Search or You</string>
-    <string name="overlay_shorts">Shorts hidden</string>
 
     <string name="recent_activity">Recent activity</string>
     <string name="no_activity">Nothing yet. Open YouTube and come back here.</string>

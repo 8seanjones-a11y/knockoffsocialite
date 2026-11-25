@@ -30,7 +30,7 @@ object Prefs {
     fun isBlockingOn(c: Context) = get(c, KEY_BLOCKING, true)
     fun setBlockingOn(c: Context, on: Boolean) = set(c, KEY_BLOCKING, on)
 
-    /** Cover the Shorts tab and Shorts rows, and close the Shorts player. On by default. */
+    /** Cover the Shorts tab and close the Shorts player. On by default. */
     fun isBlockShortsOn(c: Context) = get(c, KEY_BLOCK_SHORTS, true)
     fun setBlockShortsOn(c: Context, on: Boolean) = set(c, KEY_BLOCK_SHORTS, on)
 

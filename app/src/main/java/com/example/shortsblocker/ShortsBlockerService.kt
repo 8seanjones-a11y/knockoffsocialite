@@ -24,7 +24,7 @@ import java.util.Locale
  * For YouTube, each time the screen changes we look through the views on
  * screen ("nodes") once, and then:
  *
- *   - Shorts tab and Shorts rows -> cover them with plain boxes (OverlayManager).
+ *   - Shorts tab                 -> cover it with a plain box (OverlayManager).
  *   - Home feed                  -> cover it with a "Home feed blocked" panel.
  *   - Shorts player              -> press Back (only on strong signals, never
  *                                   on Home, and never more than 3 times in
@@ -42,9 +42,6 @@ class ShortsBlockerService : AccessibilityService() {
          * "reel_player_page_container".
          */
         val SHORTS_ID_WORDS = listOf("reel", "shorts")
-
-        /** Words in the description of a single Short in a feed ("..., play Short"). */
-        val SHORTS_ITEM_WORDS = listOf("play short")
 
         /**
          * Labels of YouTube's bottom-bar tabs and the search button. If your
@@ -73,6 +70,12 @@ class ShortsBlockerService : AccessibilityService() {
         const val MIN_WIDTH_SHARE = 0.7
         const val MIN_HEIGHT_SHARE = 0.6
 
+        /**
+         * On the Home feed we're extra careful (Back there scrolls to the top
+         * or closes YouTube): only a Shorts view this tall counts.
+         */
+        const val FULL_PLAYER_HEIGHT_SHARE = 0.85
+
         /** The bottom bar is in the bottom part of the window. */
         const val BOTTOM_BAR_SHARE = 0.8
 
@@ -93,9 +96,6 @@ class ShortsBlockerService : AccessibilityService() {
         /** In debug mode, save the whole screen at most this often. */
         const val DUMP_INTERVAL_MS = 2000L
 
-        /** Write "hiding Shorts" to the activity log at most this often. */
-        const val COVER_LOG_INTERVAL_MS = 60_000L
-
         /** Safety limits so a huge screen can't make us loop forever. */
         const val MAX_DEPTH = 60
         const val MAX_NODES = 1500
@@ -112,7 +112,6 @@ class ShortsBlockerService : AccessibilityService() {
     private var backPausedUntil = 0L
     private var lastDumpAt = 0L
     private var homeWasCovered = false
-    private var lastCoverLogAt = 0L
 
     override fun onServiceConnected() {
         overlays = OverlayManager(this)
@@ -200,7 +199,7 @@ class ShortsBlockerService : AccessibilityService() {
         }
 
         overlays.show(boxes)
-        logCoverChanges(screen, blockHome, boxes)
+        logCoverChanges(screen, blockHome)
     }
 
     /** What we found on screen in one pass over the views. */
@@ -218,7 +217,7 @@ class ShortsBlockerService : AccessibilityService() {
         var topBarBottom = Int.MIN_VALUE    // bottom of the search button
         var biggestScrollable: Rect? = null
         var shortsPlayerId: String? = null
-        val shortsItems = mutableListOf<Rect>()
+        var shortsPlayerFullHeight = false
     }
 
     private fun scan(root: AccessibilityNodeInfo, window: Rect): Screen {
@@ -276,26 +275,13 @@ class ShortsBlockerService : AccessibilityService() {
             s.biggestScrollable = b
         }
 
-        // Shorts by view ID: big = the player, small = a row/item in a feed.
-        if (containsAny(id, SHORTS_ID_WORDS)) {
-            if (b.width() >= window.width() * MIN_WIDTH_SHARE && b.height() >= window.height() * MIN_HEIGHT_SHARE) {
-                s.shortsPlayerId = id
-            } else if (b.height() <= window.height() * 0.75) {
-                s.shortsItems += b
-            }
-            return
-        }
-
-        // A single Short in a feed ("..., 1.2M views - play Short").
-        val desc = node.contentDescription?.toString() ?: ""
-        if (containsAny(desc, SHORTS_ITEM_WORDS)) {
-            s.shortsItems += clickableAncestor(node)?.let { bounds(it) } ?: b
-            return
-        }
-
-        // A "Shorts" heading (the title of a Shorts row) or a "Shorts" tab/chip.
-        if (labelIs(node, SHORTS_LABELS) && b.height() < window.height() * 0.15) {
-            s.shortsItems += shortsHeadingCover(node, b, window)
+        // A big view whose ID mentions "reel"/"shorts" is the Shorts player.
+        // (Small ones are the Shorts rows in feeds, which we leave alone.)
+        if (containsAny(id, SHORTS_ID_WORDS) &&
+            b.width() >= window.width() * MIN_WIDTH_SHARE && b.height() >= window.height() * MIN_HEIGHT_SHARE
+        ) {
+            s.shortsPlayerId = id
+            if (b.height() >= window.height() * FULL_PLAYER_HEIGHT_SHARE) s.shortsPlayerFullHeight = true
         }
     }
 
@@ -313,37 +299,15 @@ class ShortsBlockerService : AccessibilityService() {
         return if (inBar && small) tabNode to r else null
     }
 
-    /**
-     * What to cover for a "Shorts" label outside the bottom bar:
-     * - if it's a small tappable thing (a tab on a channel page, a chip), just that;
-     * - otherwise it's the heading of a Shorts row: walk up to the row itself
-     *   (full width, clearly taller than the heading) and cover all of it.
-     */
-    private fun shortsHeadingCover(node: AccessibilityNodeInfo, b: Rect, window: Rect): Rect {
-        val clickable = clickableAncestor(node, maxSteps = 2)
-        if (clickable != null) {
-            val cb = bounds(clickable)
-            if (cb.width() < window.width() * 0.5) return cb
-        }
-        var p = node.parent
-        var steps = 0
-        while (p != null && steps < 8) {
-            val pb = bounds(p)
-            if (pb.width() >= window.width() * 0.9 &&
-                pb.height() >= b.height() * 3 &&
-                pb.height() <= window.height() * 0.75
-            ) return pb
-            p = p.parent
-            steps++
-        }
-        return b
-    }
 
     private fun shortsPlayerReason(s: Screen): String? {
-        // Never press Back on the Home feed: it would scroll you to the top or
-        // close YouTube. Shorts rows there are covered instead.
-        if (s.isHomeFeed) return null
-        s.shortsPlayerId?.let { return "full-screen Shorts view (id \"$it\")" }
+        // On the Home feed, Back would scroll you to the top or close YouTube,
+        // so only press it for a Shorts player that fills the screen (a Short
+        // you tapped in a Shorts row). The loop guard protects us if wrong.
+        val id = s.shortsPlayerId
+        if (id != null && (!s.isHomeFeed || s.shortsPlayerFullHeight)) {
+            return "full-screen Shorts view (id \"$id\")"
+        }
         // Pages opened from Home (search results, channels) keep Home selected,
         // so only trust the Shorts tab when Home isn't selected.
         if (s.shortsTabSelected && !s.homeSelected) return "Shorts tab is selected"
@@ -366,18 +330,9 @@ class ShortsBlockerService : AccessibilityService() {
 
         if (blockShorts) {
             s.shortsTab?.let { boxes += OverlayManager.Box(Rect(it), null) }
-            if (!coverHome) {
-                // Biggest first, and skip anything already inside a box.
-                val rows = s.shortsItems
-                    .map { Rect(it).apply { intersect(window.left, contentTop, window.right, contentBottom) } }
-                    .filter { it.width() > 0 && it.height() > 0 && it.top >= contentTop && it.bottom <= contentBottom }
-                    .sortedByDescending { it.width() * it.height() }
-                val kept = mutableListOf<Rect>()
-                for (r in rows) {
-                    if (kept.none { it.contains(r) }) kept += r
-                }
-                kept.forEach { boxes += OverlayManager.Box(it, getString(R.string.overlay_shorts)) }
-            }
+            // Shorts rows in feeds are NOT covered: boxes can't keep up with
+            // scrolling and were left behind as empty white boxes. Tapping a
+            // Short there opens the player, which we close with Back.
         }
         return boxes.take(MAX_BOXES)
     }
@@ -410,17 +365,11 @@ class ShortsBlockerService : AccessibilityService() {
         Toast.makeText(this, "Shorts blocked", Toast.LENGTH_SHORT).show()
     }
 
-    private fun logCoverChanges(s: Screen, blockHome: Boolean, boxes: List<OverlayManager.Box>) {
+    private fun logCoverChanges(s: Screen, blockHome: Boolean) {
         val homeCovered = blockHome && s.isHomeFeed
         if (homeCovered && !homeWasCovered) Prefs.addLog(this, "Covered the Home feed")
         homeWasCovered = homeCovered
 
-        val shortsBoxes = boxes.count { it.message == getString(R.string.overlay_shorts) }
-        val now = SystemClock.elapsedRealtime()
-        if (shortsBoxes > 0 && now - lastCoverLogAt > COVER_LOG_INTERVAL_MS) {
-            lastCoverLogAt = now
-            Prefs.addLog(this, "Covered $shortsBoxes Shorts row(s)/item(s)")
-        }
     }
 
     // ---------------------------------------------------------------------
