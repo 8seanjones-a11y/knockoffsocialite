@@ -1,9 +1,16 @@
 # Shorts Blocker
 
-A small Android app that stops you watching YouTube Shorts in the official
-YouTube app. When the Shorts player or the Shorts tab shows up, it presses
-**Back** for you. Normal videos, search, subscriptions and the Home feed keep
-working.
+A small Android app that makes the official YouTube app less of a time sink.
+You choose what it blocks:
+
+- **Shorts.** When the Shorts player or the Shorts tab shows up, it presses
+  **Back** for you.
+- **Home feed** (the recommendations), optional. Whenever YouTube shows Home,
+  it taps **Subscriptions** for you instead. Then the only ways to find videos
+  are **Subscriptions**, **Search** and the **You** tab (History, Watch later,
+  playlists).
+
+Normal videos keep playing as usual.
 
 - No internet permission (no permissions at all), no analytics, no data collection.
 - Watches **only** the YouTube app (`com.google.android.youtube`).
@@ -18,7 +25,9 @@ press buttons for you. Screen readers like TalkBack use them. This app is one
 that only listens to YouTube.
 
 Each time YouTube's screen changes, `ShortsBlockerService.kt` looks through the
-views on screen and asks three questions:
+views on screen.
+
+**Shorts** (if ticked). It asks three questions:
 
 | # | Check | Why it's reliable |
 |---|-------|-------------------|
@@ -28,6 +37,41 @@ views on screen and asks three questions:
 
 If any check says yes, it presses Back (at most once every 1.2 s, so it can't
 get stuck pressing Back over and over) and shows a "Shorts blocked" toast.
+
+**Home feed** (if ticked). If the **Home** tab in the bottom bar is selected,
+it taps the **Subscriptions** tab. It doesn't press Back, because Home is
+YouTube's first screen and Back would just close the app. "Bottom bar" means
+the bottom 20% of the window, so the "Home" tab on a channel's page is left
+alone. When you open YouTube you'll land on Subscriptions.
+
+### The main screen
+
+| Control | What it does |
+|---------|--------------|
+| **Blocker on** | Main switch. Off = nothing is blocked. |
+| **Shorts** ☑ | Block Shorts (on by default). |
+| **Home feed** ☐ | Replace Home with Subscriptions (off by default). |
+| **Debug logging** | Write what's on screen to Logcat (section 7). |
+
+### What it can't block
+
+The "Up next" list **under a video you're watching** can't be hidden without
+also stopping you watching the video, so it stays. To cut it down, use
+YouTube's own settings: *You → ⚙ Settings → Autoplay* → off. Also, if you
+**pause your watch history** (*You → ⚙ → Manage all history*), YouTube shows
+far fewer recommendations everywhere.
+
+### Not using YouTube in English?
+
+"Shorts" is the same word in almost every language, but **Home** and
+**Subscriptions** are translated. If Home blocking doesn't work, use debug
+mode to see your tab labels (`desc="..."` at the bottom of the screen) and add
+them in `ShortsBlockerService.kt`:
+
+```kotlin
+val HOME_TAB_LABELS = listOf("Home", "Startseite")
+val SUBSCRIPTIONS_TAB_LABELS = listOf("Subscriptions", "Abos")
+```
 
 ### Project files
 
@@ -233,7 +277,7 @@ save battery. If blocking stops after a while:
 
 ## 6. Test it
 
-With the service on and **Block Shorts** switched on:
+With the service on, **Blocker on** switched on and **Shorts** ticked:
 
 | Try this | Expected |
 |----------|----------|
@@ -242,7 +286,16 @@ With the service on and **Block Shorts** switched on:
 | Open a Shorts link (`youtube.com/shorts/…`) from another app | Blocked. Back may close YouTube if the Short was the first screen. |
 | Scroll the Home feed past the Shorts row | Nothing happens (the row itself is allowed) |
 | Play a normal video, search, open Subscriptions, Library | Everything works normally |
-| Turn **Block Shorts** off in the app, open Shorts | Shorts play (the switch pauses blocking) |
+| Turn **Blocker on** off in the app, open Shorts | Shorts play (the switch pauses blocking) |
+
+Now tick **Home feed** too:
+
+| Try this | Expected |
+|----------|----------|
+| Open YouTube | It switches to Subscriptions, with a "Home feed blocked" toast |
+| Tap the **Home** tab | Same: back to Subscriptions |
+| Open a channel and tap its own "Home" tab | Works normally (it's not the bottom bar) |
+| Search, open You → History / Watch later | Works normally |
 
 You may see the Short for a split second before Back fires. That's normal.
 
@@ -254,8 +307,9 @@ If a YouTube update breaks the blocker, debug mode shows you what YouTube's
 screen is made of so you can fix it.
 
 1. Connect the phone over USB (section 4, Option A).
-2. In Shorts Blocker, turn on **Debug logging**. You can turn **Block Shorts**
-   off while you look, so the blocker doesn't close Shorts on you.
+2. In Shorts Blocker, turn on **Debug logging**. You can turn **Blocker on**
+   off while you look, so the blocker doesn't close things on you. (Debug
+   mode still logs what it *would* have blocked.)
 3. In PowerShell, clear old logs and start watching:
 
    ```powershell
@@ -273,14 +327,15 @@ screen is made of so you can fix it.
    D ShortsBlocker:     FrameLayout id=reel_player_page_container size=1080x2201
    D ShortsBlocker:       RecyclerView id=reel_recycler size=1080x2201
    D ShortsBlocker:         Button desc="Like this video along with 12K other people" size=132x132
-   D ShortsBlocker:   Button desc="Shorts" SELECTED size=216x150
+   D ShortsBlocker:   Button desc="Shorts" SELECTED clickable at y=2190 size=216x150
    D ShortsBlocker: ===== End of dump (187 views) =====
    I ShortsBlocker: Shorts detected: full-screen view with id "reel_player_page_container"
    I ShortsBlocker: Pressed Back (full-screen view with id "reel_player_page_container")
    ```
 
    Each line is one view: its type, `id=`, `text=`, `desc=` (content
-   description), `SELECTED` if it's the active tab, and its size in pixels.
+   description), `SELECTED` if it's the active tab, `clickable` if it can be
+   tapped, how far down the screen it starts (`y=`), and its size in pixels.
    Indentation shows which views are inside which.
 
 5. **If Shorts aren't blocked any more:** look for an `id=` on a view that
@@ -310,4 +365,5 @@ Turn debug logging off when you're done. It uses a little extra battery.
 | The service switches itself off | Android turns accessibility services off if the app crashes. Turn it on again. If it keeps happening, look at `adb logcat` (without `-s`) for the error. |
 | `INSTALL_FAILED_UPDATE_INCOMPATIBLE` | An older copy was signed with a different key. Uninstall it (`adb uninstall com.example.shortsblocker`) and install again. |
 | `adb devices` shows `unauthorized` | Unlock the phone and accept the "Allow USB debugging?" popup. |
-| Nothing is blocked | Check the main screen says ✅, **Block Shorts** is on, and battery is Unrestricted. Then use debug mode (section 7). |
+| Nothing is blocked | Check the main screen says ✅, **Blocker on** is on, the right boxes are ticked, and battery is Unrestricted. Then use debug mode (section 7). |
+| Logcat says "can't find the Subscriptions tab" | Your tab label is different (another language, or YouTube renamed it). See "Not using YouTube in English?" in section 1. |
