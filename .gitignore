@@ -1,0 +1,8 @@
+# Build output and machine-specific files — never commit these.
+build/
+.gradle/
+.kotlin/
+local.properties
+.idea/
+*.iml
+*.apk

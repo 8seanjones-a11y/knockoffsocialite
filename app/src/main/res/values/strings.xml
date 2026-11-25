@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- All the text the app shows, in one place. -->
+<resources>
+    <string name="app_name">Shorts Blocker</string>
+
+    <string name="service_description">Watches only the YouTube app. When the Shorts player or the Shorts tab appears, it presses Back for you. It reads nothing from other apps and has no internet access.</string>
+
+    <string name="how_to">How to turn it on:\n1. Tap “Open Accessibility Settings”.\n2. Find “Shorts Blocker” (often under “Downloaded apps” or “Installed apps”) and switch it on.\n3. If the switch is greyed out (Android 13+), tap “Open App Info”, then ⋮ (top right) → “Allow restricted settings”, and try step 2 again.</string>
+
+    <string name="blocking_switch">Block Shorts</string>
+    <string name="debug_switch">Debug logging (Logcat tag: ShortsBlocker)</string>
+    <string name="open_accessibility">Open Accessibility Settings</string>
+    <string name="open_app_info">Open App Info</string>
+
+    <string name="status_on">✅ The service is turned on in Accessibility settings.</string>
+    <string name="status_off">⚠️ The service is OFF. Turn it on in Accessibility settings (steps below).</string>
+
+    <string name="privacy">No internet permission, no analytics, no data collection. Debug logs stay on your phone.</string>
+</resources>

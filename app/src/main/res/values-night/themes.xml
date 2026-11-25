@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Used instead of values/themes.xml when the phone is in dark mode. -->
+<resources>
+    <style name="AppTheme" parent="@android:style/Theme.Material">
+        <item name="android:colorAccent">#EF5350</item>
+        <item name="android:colorPrimary">#C62828</item>
+        <item name="android:colorPrimaryDark">#8E0000</item>
+    </style>
+</resources>

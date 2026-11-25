@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 108x108 canvas; the middle 66x66 is what launchers always show. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- play triangle -->
+    <path android:fillColor="#FFFFFF" android:pathData="M46,40 L68,54 L46,68 Z" />
+    <!-- circle outline -->
+    <path android:strokeColor="#FFFFFF" android:strokeWidth="5"
+        android:pathData="M54,30 A24,24 0 1,1 53.99,30 Z" />
+    <!-- diagonal slash -->
+    <path android:strokeColor="#FFFFFF" android:strokeWidth="5" android:strokeLineCap="round"
+        android:pathData="M37,37 L71,71" />
+</vector>

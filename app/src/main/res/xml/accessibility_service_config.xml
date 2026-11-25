@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Settings for the accessibility service.
+
+  packageNames         Only send us events from the YouTube app. Android won't
+                       tell us anything about any other app.
+  accessibilityEventTypes
+                       Which kinds of events we want:
+                       - windowStateChanged: a new screen/popup opened
+                       - windowContentChanged: something on screen changed
+                       - viewScrolled: you swiped (e.g. to the next Short)
+  canRetrieveWindowContent
+                       Lets us look at the views on screen (needed to spot Shorts).
+  accessibilityFlags   flagReportViewIds: give us view IDs like "reel_recycler".
+                       flagIncludeNotImportantViews: include views that
+                       TalkBack would normally skip (many IDs live on those).
+  notificationTimeout  Combine events that arrive within 100 ms into one, so we
+                       don't do extra work while YouTube is animating.
+-->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:packageNames="com.google.android.youtube"
+    android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged|typeViewScrolled"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:accessibilityFlags="flagReportViewIds|flagIncludeNotImportantViews"
+    android:canRetrieveWindowContent="true"
+    android:notificationTimeout="100"
+    android:description="@string/service_description"
+    android:settingsActivity="com.example.shortsblocker.MainActivity" />
