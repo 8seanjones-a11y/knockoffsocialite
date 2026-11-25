@@ -8,6 +8,7 @@ import android.os.Bundle
 import android.provider.Settings
 import android.view.accessibility.AccessibilityManager
 import android.widget.Button
+import android.widget.CheckBox
 import android.widget.Switch
 import android.widget.TextView
 
@@ -25,10 +26,19 @@ class MainActivity : Activity() {
 
         status = findViewById(R.id.status)
 
-        // "Block Shorts" switch: saved setting, read by the service.
+        // Each switch/checkbox shows the saved setting and saves it when
+        // changed. The service reads the same settings.
         val blockingSwitch = findViewById<Switch>(R.id.blockingSwitch)
         blockingSwitch.isChecked = Prefs.isBlockingOn(this)
         blockingSwitch.setOnCheckedChangeListener { _, on -> Prefs.setBlockingOn(this, on) }
+
+        val blockShorts = findViewById<CheckBox>(R.id.blockShorts)
+        blockShorts.isChecked = Prefs.isBlockShortsOn(this)
+        blockShorts.setOnCheckedChangeListener { _, on -> Prefs.setBlockShortsOn(this, on) }
+
+        val blockHome = findViewById<CheckBox>(R.id.blockHome)
+        blockHome.isChecked = Prefs.isBlockHomeOn(this)
+        blockHome.setOnCheckedChangeListener { _, on -> Prefs.setBlockHomeOn(this, on) }
 
         // "Debug logging" switch.
         val debugSwitch = findViewById<Switch>(R.id.debugSwitch)

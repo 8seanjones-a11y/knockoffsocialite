@@ -22,6 +22,7 @@
             android:textSize="16sp"
             android:textStyle="bold" />
 
+        <!-- Main on/off switch. -->
         <Switch
             android:id="@+id/blockingSwitch"
             android:layout_width="match_parent"
@@ -31,11 +32,41 @@
             android:text="@string/blocking_switch"
             android:textSize="18sp" />
 
+        <!-- What to block. -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="@string/what_to_block"
+            android:textStyle="bold" />
+
+        <CheckBox
+            android:id="@+id/blockShorts"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="48dp"
+            android:text="@string/block_shorts" />
+
+        <CheckBox
+            android:id="@+id/blockHome"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="48dp"
+            android:text="@string/block_home" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="32dp"
+            android:alpha="0.7"
+            android:text="@string/block_home_hint"
+            android:textSize="13sp" />
+
         <Switch
             android:id="@+id/debugSwitch"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
+            android:layout_marginTop="16dp"
             android:minHeight="48dp"
             android:text="@string/debug_switch" />
 
