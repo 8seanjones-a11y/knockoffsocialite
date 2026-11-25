@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  The main screen: a scrollable column of text, two switches and two buttons.
+  The main screen: a scrollable column of text, switches, recent activity and buttons.
   fitsSystemWindows keeps content clear of the status bar and navigation bar.
 -->
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
@@ -69,6 +69,44 @@
             android:layout_marginTop="16dp"
             android:minHeight="48dp"
             android:text="@string/debug_switch" />
+
+        <!-- What the blocker did recently, so problems can be seen without a PC. -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="@string/recent_activity"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/activityLog"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:fontFamily="monospace"
+            android:textIsSelectable="true"
+            android:textSize="12sp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:alpha="0.7"
+            android:text="@string/share_hint"
+            android:textSize="13sp" />
+
+        <Button
+            android:id="@+id/shareInfo"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/share_info" />
+
+        <Button
+            android:id="@+id/clearActivity"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/clear_activity" />
 
         <Button
             android:id="@+id/openAccessibility"

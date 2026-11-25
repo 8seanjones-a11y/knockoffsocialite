@@ -1,6 +1,10 @@
 package com.example.shortsblocker
 
 import android.content.Context
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 /**
  * The app's settings (the switches on the main screen), saved on the phone
@@ -26,15 +30,48 @@ object Prefs {
     fun isBlockingOn(c: Context) = get(c, KEY_BLOCKING, true)
     fun setBlockingOn(c: Context, on: Boolean) = set(c, KEY_BLOCKING, on)
 
-    /** Block the Shorts player and Shorts tab. On by default. */
+    /** Cover the Shorts tab and Shorts rows, and close the Shorts player. On by default. */
     fun isBlockShortsOn(c: Context) = get(c, KEY_BLOCK_SHORTS, true)
     fun setBlockShortsOn(c: Context, on: Boolean) = set(c, KEY_BLOCK_SHORTS, on)
 
-    /** Block the Home feed (recommendations) by switching to Subscriptions. Off by default. */
+    /** Cover the Home feed (recommendations). Off by default. */
     fun isBlockHomeOn(c: Context) = get(c, KEY_BLOCK_HOME, false)
     fun setBlockHomeOn(c: Context, on: Boolean) = set(c, KEY_BLOCK_HOME, on)
 
-    /** Debug logging to Logcat. Off by default. */
+    /** Debug mode: save screen info (and log to Logcat). Off by default. */
     fun isDebugOn(c: Context) = get(c, KEY_DEBUG, false)
     fun setDebugOn(c: Context, on: Boolean) = set(c, KEY_DEBUG, on)
+
+    // -----------------------------------------------------------------
+    // Recent activity: the last few things the blocker did, shown on the
+    // main screen so you can see (and share) what happened without a PC.
+    // -----------------------------------------------------------------
+
+    private const val KEY_LOG = "activity_log"
+    private const val LOG_LINES = 30
+
+    fun addLog(c: Context, line: String) {
+        val time = SimpleDateFormat("HH:mm:ss", Locale.US).format(Date())
+        val old = getLog(c).lines().filter { it.isNotBlank() }.takeLast(LOG_LINES - 1)
+        prefs(c).edit().putString(KEY_LOG, (old + "$time  $line").joinToString("\n")).apply()
+    }
+
+    fun getLog(c: Context): String = prefs(c).getString(KEY_LOG, "") ?: ""
+
+    fun clearLog(c: Context) = prefs(c).edit().remove(KEY_LOG).apply()
+
+    // -----------------------------------------------------------------
+    // Screen info: in debug mode the service saves a description of the last
+    // YouTube screen here, so it can be shared from the main screen.
+    // -----------------------------------------------------------------
+
+    private const val SCREEN_FILE = "screen_info.txt"
+
+    fun saveScreenInfo(c: Context, text: String) {
+        try { File(c.filesDir, SCREEN_FILE).writeText(text) } catch (_: Exception) {}
+    }
+
+    fun readScreenInfo(c: Context): String? = try {
+        File(c.filesDir, SCREEN_FILE).takeIf { it.exists() }?.readText()
+    } catch (_: Exception) { null }
 }

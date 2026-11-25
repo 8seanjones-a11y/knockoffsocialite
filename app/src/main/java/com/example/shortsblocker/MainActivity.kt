@@ -4,6 +4,7 @@ import android.accessibilityservice.AccessibilityServiceInfo
 import android.app.Activity
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.view.accessibility.AccessibilityManager
@@ -13,18 +14,20 @@ import android.widget.Switch
 import android.widget.TextView
 
 /**
- * The screen you see when you open the app: two switches, two buttons and a
- * status line. All the blocking happens in ShortsBlockerService.
+ * The screen you see when you open the app: switches, buttons, a status line
+ * and the recent activity. All the blocking happens in ShortsBlockerService.
  */
 class MainActivity : Activity() {
 
     private lateinit var status: TextView
+    private lateinit var activityLog: TextView
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
         status = findViewById(R.id.status)
+        activityLog = findViewById(R.id.activityLog)
 
         // Each switch/checkbox shows the saved setting and saves it when
         // changed. The service reads the same settings.
@@ -40,10 +43,19 @@ class MainActivity : Activity() {
         blockHome.isChecked = Prefs.isBlockHomeOn(this)
         blockHome.setOnCheckedChangeListener { _, on -> Prefs.setBlockHomeOn(this, on) }
 
-        // "Debug logging" switch.
+        // "Debug mode" switch.
         val debugSwitch = findViewById<Switch>(R.id.debugSwitch)
         debugSwitch.isChecked = Prefs.isDebugOn(this)
         debugSwitch.setOnCheckedChangeListener { _, on -> Prefs.setDebugOn(this, on) }
+
+        // Sends the recent activity and the last saved YouTube screen to any app
+        // you pick (messages, email, notes...), so it can be pasted for help.
+        findViewById<Button>(R.id.shareInfo).setOnClickListener { shareInfo() }
+
+        findViewById<Button>(R.id.clearActivity).setOnClickListener {
+            Prefs.clearLog(this)
+            showLog()
+        }
 
         // Opens Android's Accessibility settings, where you turn the service on.
         findViewById<Button>(R.id.openAccessibility).setOnClickListener {
@@ -64,6 +76,31 @@ class MainActivity : Activity() {
     override fun onResume() {
         super.onResume()
         status.setText(if (isServiceEnabled()) R.string.status_on else R.string.status_off)
+        showLog()
+    }
+
+    private fun showLog() {
+        val log = Prefs.getLog(this)
+        activityLog.text = log.ifBlank { getString(R.string.no_activity) }
+    }
+
+    private fun shareInfo() {
+        val version = try {
+            packageManager.getPackageInfo(packageName, 0).versionName
+        } catch (_: Exception) { "?" }
+        val text = buildString {
+            append("Shorts Blocker ").append(version)
+            append(" on ").append(Build.MANUFACTURER).append(' ').append(Build.MODEL)
+            append(", Android ").append(Build.VERSION.RELEASE).append("\n\n")
+            append("Recent activity:\n").append(Prefs.getLog(this@MainActivity).ifBlank { "(none)" }).append("\n\n")
+            append(Prefs.readScreenInfo(this@MainActivity) ?: getString(R.string.no_screen_info))
+        }
+        val send = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_SUBJECT, "Shorts Blocker screen info")
+            putExtra(Intent.EXTRA_TEXT, text)
+        }
+        startActivity(Intent.createChooser(send, getString(R.string.share_info)))
     }
 
     /** Asks Android whether our accessibility service is switched on. */

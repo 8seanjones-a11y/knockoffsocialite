@@ -1,24 +1,34 @@
 package com.example.shortsblocker
 
 import android.accessibilityservice.AccessibilityService
+import android.content.Intent
 import android.graphics.Rect
+import android.os.Handler
+import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.widget.Toast
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 /**
  * The accessibility service: the part that actually blocks things.
  *
- * Android calls onAccessibilityEvent() whenever something changes on screen in
- * YouTube (the config file limits us to YouTube). Each time, we look through
- * the views on screen ("nodes") for the things you chose to block:
+ * Android calls onAccessibilityEvent() whenever something changes on screen.
+ * Events from other apps are only used to notice that YouTube has gone to the
+ * background (then we remove our boxes); nothing from them is read or kept.
  *
- *   - Shorts       -> we press Back.
- *   - Home feed    -> we tap the Subscriptions tab instead. (Pressing Back on
- *                     Home would just close YouTube, because Home is the
- *                     first screen.)
+ * For YouTube, each time the screen changes we look through the views on
+ * screen ("nodes") once, and then:
+ *
+ *   - Shorts tab and Shorts rows -> cover them with plain boxes (OverlayManager).
+ *   - Home feed                  -> cover it with a "Home feed blocked" panel.
+ *   - Shorts player              -> press Back (only on strong signals, never
+ *                                   on Home, and never more than 3 times in
+ *                                   10 seconds, so it can't fight you).
  */
 class ShortsBlockerService : AccessibilityService() {
 
@@ -27,230 +37,397 @@ class ShortsBlockerService : AccessibilityService() {
         const val YOUTUBE = "com.google.android.youtube"
 
         /**
-         * View IDs that belong to the Shorts player. YouTube's internal name
-         * for Shorts is "reel", so its player views have IDs like
-         * "reel_recycler" or "reel_player_page_container". If YouTube renames
-         * them, turn on debug mode, find the new ID in Logcat and add a word
-         * from it here.
+         * Words in the view IDs of Shorts things. YouTube's internal name for
+         * Shorts is "reel", so its views have IDs like "reel_recycler" or
+         * "reel_player_page_container".
          */
         val SHORTS_ID_WORDS = listOf("reel", "shorts")
 
-        /**
-         * The labels of YouTube's bottom-bar tabs. "Shorts" is the same in
-         * almost every language, but "Home" and "Subscriptions" are
-         * translated. If your phone isn't in English, add your language's
-         * words here (debug mode shows them as desc="...").
-         */
-        val SHORTS_TAB_LABELS = listOf("Shorts")
-        val HOME_TAB_LABELS = listOf("Home")
-        val SUBSCRIPTIONS_TAB_LABELS = listOf("Subscriptions")
+        /** Words in the description of a single Short in a feed ("..., play Short"). */
+        val SHORTS_ITEM_WORDS = listOf("play short")
 
         /**
-         * A view only counts as "the Shorts player" if it covers at least this
-         * much of YouTube's window. This stops the small row of Shorts on the
-         * Home feed (which also uses "reel" IDs) from triggering a Back press.
+         * Labels of YouTube's bottom-bar tabs and the search button. If your
+         * phone isn't in English, add your language's words here (debug mode
+         * shows them as desc="...").
          */
+        val SHORTS_LABELS = listOf("Shorts")
+        val HOME_TAB_LABELS = listOf("Home")
+        val OTHER_TAB_LABELS = listOf("Subscriptions", "You", "Create", "Library")
+        val SEARCH_LABELS = listOf("Search")
+
+        /** A view counts as the Shorts *player* if it is at least this big. */
         const val MIN_WIDTH_SHARE = 0.7
         const val MIN_HEIGHT_SHARE = 0.6
 
-        /**
-         * The bottom bar is the bottom part of the window. Requiring a tab to
-         * be down there stops us reacting to, for example, the "Home" tab on a
-         * channel's page, which sits near the top.
-         */
+        /** The bottom bar is in the bottom part of the window. */
         const val BOTTOM_BAR_SHARE = 0.8
 
-        /** Wait at least this long between two actions, so we never spam Back. */
-        const val ACTION_COOLDOWN_MS = 1200L
+        /** The top bar (logo, search) is in the top part of the window. */
+        const val TOP_BAR_SHARE = 0.2
 
-        /** In debug mode, log the whole screen at most this often. */
+        /** Wait at least this long between two Back presses. */
+        const val BACK_COOLDOWN_MS = 1200L
+
+        /** Loop guard: this many Backs within the window pauses Back for a while. */
+        const val LOOP_MAX_BACKS = 3
+        const val LOOP_WINDOW_MS = 10_000L
+        const val LOOP_PAUSE_MS = 30_000L
+
+        /** Re-check the screen this long after the last change (scrolling stopped). */
+        const val SETTLE_MS = 250L
+
+        /** In debug mode, save the whole screen at most this often. */
         const val DUMP_INTERVAL_MS = 2000L
+
+        /** Write "hiding Shorts" to the activity log at most this often. */
+        const val COVER_LOG_INTERVAL_MS = 60_000L
 
         /** Safety limits so a huge screen can't make us loop forever. */
         const val MAX_DEPTH = 60
-        const val MAX_NODES_IN_DUMP = 400
+        const val MAX_NODES = 1500
+        const val MAX_NODES_IN_DUMP = 800
+        const val MAX_BOXES = 12
     }
 
-    private var lastActionAt = 0L
+    private lateinit var overlays: OverlayManager
+    private val handler = Handler(Looper.getMainLooper())
+    private val settle = Runnable { refresh(null) }
+
+    private var lastBackAt = 0L
+    private val recentBacks = ArrayDeque<Long>()
+    private var backPausedUntil = 0L
     private var lastDumpAt = 0L
+    private var homeWasCovered = false
+    private var lastCoverLogAt = 0L
 
     override fun onServiceConnected() {
-        Log.i(TAG, "Service connected. Watching $YOUTUBE only.")
+        overlays = OverlayManager(this)
+        Log.i(TAG, "Service connected.")
+        Prefs.addLog(this, "Service started")
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent) {
-        if (event.packageName?.toString() != YOUTUBE) return
+        if (!::overlays.isInitialized) return
+        val pkg = event.packageName?.toString()
+        if (pkg == packageName) return  // our own boxes
 
+        if (pkg != YOUTUBE) {
+            // Another app (home screen, notification shade, ...) opened a
+            // window. If YouTube is no longer in front, take our boxes away.
+            if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED &&
+                rootInActiveWindow?.packageName?.toString() != YOUTUBE
+            ) {
+                hideAll()
+            }
+            return
+        }
+
+        refresh(event)
+        // Events stop when scrolling stops, so check once more shortly after
+        // the last one, to put the boxes exactly in place.
+        handler.removeCallbacks(settle)
+        handler.postDelayed(settle, SETTLE_MS)
+    }
+
+    override fun onInterrupt() = hideAll()
+
+    override fun onUnbind(intent: Intent?): Boolean {
+        handler.removeCallbacks(settle)
+        hideAll()
+        return super.onUnbind(intent)
+    }
+
+    private fun hideAll() {
+        if (::overlays.isInitialized) overlays.clear()
+        homeWasCovered = false
+    }
+
+    // ---------------------------------------------------------------------
+    // The main check
+    // ---------------------------------------------------------------------
+
+    private fun refresh(event: AccessibilityEvent?) {
         val blocking = Prefs.isBlockingOn(this)
         val debug = Prefs.isDebugOn(this)
-        if (!blocking && !debug) return  // nothing to do
 
-        // The window YouTube is showing right now. It can be null for a moment
-        // while screens change, so then we simply wait for the next event.
+        // The window YouTube is showing. It can be null for a moment while
+        // screens change; then we keep things as they are and wait.
         val root = rootInActiveWindow ?: return
-        if (root.packageName?.toString() != YOUTUBE) return  // e.g. the keyboard is on top
-
-        if (debug) dumpScreen(root, event)
-
-        val window = Rect()
-        root.getBoundsInScreen(window)
-
-        // 1. Shorts -> press Back.
-        if (Prefs.isBlockShortsOn(this)) {
-            val reason = findShorts(root, window, event)
-            if (reason != null) {
-                if (debug) Log.i(TAG, "Shorts detected: $reason")
-                if (blocking) pressBack(reason)
-                return
-            }
+        if (root.packageName?.toString() != YOUTUBE) {  // e.g. another app is in front
+            hideAll()
+            return
+        }
+        if (!blocking && !debug) {
+            hideAll()
+            return
         }
 
-        // 2. Home feed -> tap the Subscriptions tab.
-        if (Prefs.isBlockHomeOn(this)) {
-            val homeTab = findNode(root) { isBottomTab(it, window, HOME_TAB_LABELS, mustBeSelected = true) }
-            if (homeTab != null) {
-                if (debug) Log.i(TAG, "Home feed detected (Home tab is selected)")
-                if (blocking) openSubscriptions(root, window)
-            }
+        val window = Rect().also { root.getBoundsInScreen(it) }
+        val screen = scan(root, window)
+        val blockShorts = Prefs.isBlockShortsOn(this)
+        val blockHome = Prefs.isBlockHomeOn(this)
+
+        // 1. Shorts player is open -> press Back.
+        val playerReason = if (blockShorts) shortsPlayerReason(screen) else null
+
+        // 2. Everything to cover.
+        val boxes = if (playerReason == null) boxesFor(screen, window, blockShorts, blockHome) else emptyList()
+
+        if (debug) dumpScreen(root, event, window, screen, playerReason, boxes)
+        if (!blocking) {
+            hideAll()
+            return
+        }
+
+        if (playerReason != null) {
+            overlays.clear()
+            pressBack(playerReason)
+            return
+        }
+
+        overlays.show(boxes)
+        logCoverChanges(screen, blockHome, boxes)
+    }
+
+    /** What we found on screen in one pass over the views. */
+    private class Screen {
+        var homeSelected = false
+        var shortsTabSelected = false
+        var shortsTab: Rect? = null
+        var barTop = Int.MAX_VALUE          // top of the bottom bar
+        var topBarBottom = Int.MIN_VALUE    // bottom of the search button
+        var biggestScrollable: Rect? = null
+        var shortsPlayerId: String? = null
+        val shortsItems = mutableListOf<Rect>()
+    }
+
+    private fun scan(root: AccessibilityNodeInfo, window: Rect): Screen {
+        val s = Screen()
+        val count = intArrayOf(0)
+        scanNode(root, 0, window, s, count)
+        if (s.barTop == Int.MAX_VALUE) s.barTop = window.bottom
+        return s
+    }
+
+    private fun scanNode(node: AccessibilityNodeInfo, depth: Int, window: Rect, s: Screen, count: IntArray) {
+        if (depth > MAX_DEPTH || count[0]++ > MAX_NODES) return
+        if (node.isVisibleToUser) inspect(node, window, s)
+        for (i in 0 until node.childCount) {
+            val child = node.getChild(i) ?: continue
+            scanNode(child, depth + 1, window, s, count)
         }
     }
 
-    override fun onInterrupt() {
-        // Required by Android; we have nothing to stop.
-    }
+    private fun inspect(node: AccessibilityNodeInfo, window: Rect, s: Screen) {
+        val b = bounds(node)
+        if (b.isEmpty) return
+        val id = shortId(node)
 
-    // ---------------------------------------------------------------------
-    // Detection
-    // ---------------------------------------------------------------------
+        // Bottom-bar tabs.
+        val tab = bottomTab(node, window)
+        if (tab != null) {
+            val (tabNode, tabRect) = tab
+            s.barTop = minOf(s.barTop, tabRect.top)
+            val selected = node.isSelected || tabNode.isSelected
+            when {
+                hasLabel(node, HOME_TAB_LABELS) -> if (selected) s.homeSelected = true
+                hasLabel(node, SHORTS_LABELS) -> {
+                    s.shortsTab = tabRect
+                    if (selected) s.shortsTabSelected = true
+                }
+            }
+            return
+        }
+
+        // Search button: the Home cover starts below it.
+        if (b.bottom <= window.top + window.height() * TOP_BAR_SHARE && hasLabel(node, SEARCH_LABELS)) {
+            s.topBarBottom = maxOf(s.topBarBottom, b.bottom)
+        }
+
+        // The main scrolling list (the feed).
+        if (node.isScrollable && b.width() * b.height() > (s.biggestScrollable?.let { it.width() * it.height() } ?: 0)) {
+            s.biggestScrollable = b
+        }
+
+        // Shorts by view ID: big = the player, small = a row/item in a feed.
+        if (containsAny(id, SHORTS_ID_WORDS)) {
+            if (b.width() >= window.width() * MIN_WIDTH_SHARE && b.height() >= window.height() * MIN_HEIGHT_SHARE) {
+                s.shortsPlayerId = id
+            } else if (b.height() <= window.height() * 0.75) {
+                s.shortsItems += b
+            }
+            return
+        }
+
+        // A single Short in a feed ("..., 1.2M views - play Short").
+        val desc = node.contentDescription?.toString() ?: ""
+        if (containsAny(desc, SHORTS_ITEM_WORDS)) {
+            s.shortsItems += clickableAncestor(node)?.let { bounds(it) } ?: b
+            return
+        }
+
+        // A "Shorts" heading (the title of a Shorts row) or a "Shorts" tab/chip.
+        if (labelIs(node, SHORTS_LABELS) && b.height() < window.height() * 0.15) {
+            s.shortsItems += shortsHeadingCover(node, b, window)
+        }
+    }
 
     /**
-     * Returns a short description of why this looks like Shorts,
-     * or null if it doesn't.
+     * If this view is (part of) a bottom-bar tab, returns the tab's tappable
+     * view and its bounds. A tab sits at the very bottom, is narrow and short.
      */
-    private fun findShorts(root: AccessibilityNodeInfo, window: Rect, event: AccessibilityEvent): String? {
-        // Check A: when a new screen opens, Android tells us its class name.
-        // Shorts screens sometimes have "Reel" or "Shorts" in it.
-        if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
-            val className = event.className?.toString() ?: ""
-            if (containsShortsWord(className)) return "screen class name \"$className\""
-        }
+    private fun bottomTab(node: AccessibilityNodeInfo, window: Rect): Pair<AccessibilityNodeInfo, Rect>? {
+        if (!hasLabel(node, HOME_TAB_LABELS + SHORTS_LABELS + OTHER_TAB_LABELS)) return null
+        val tabNode = clickableAncestor(node) ?: node
+        val r = bounds(tabNode)
+        val inBar = r.top >= window.top + window.height() * BOTTOM_BAR_SHARE &&
+                r.bottom >= window.top + window.height() * 0.9
+        val small = r.width() < window.width() * 0.4 && r.height() < window.height() * 0.15
+        return if (inBar && small) tabNode to r else null
+    }
 
-        // Check B: a big view whose ID mentions "reel" or "shorts" = the Shorts player.
-        findNode(root) { isBigShortsView(it, window) }?.let {
-            return "full-screen view with id \"${shortId(it)}\""
+    /**
+     * What to cover for a "Shorts" label outside the bottom bar:
+     * - if it's a small tappable thing (a tab on a channel page, a chip), just that;
+     * - otherwise it's the heading of a Shorts row: walk up to the row itself
+     *   (full width, clearly taller than the heading) and cover all of it.
+     */
+    private fun shortsHeadingCover(node: AccessibilityNodeInfo, b: Rect, window: Rect): Rect {
+        val clickable = clickableAncestor(node, maxSteps = 2)
+        if (clickable != null) {
+            val cb = bounds(clickable)
+            if (cb.width() < window.width() * 0.5) return cb
         }
+        var p = node.parent
+        var steps = 0
+        while (p != null && steps < 8) {
+            val pb = bounds(p)
+            if (pb.width() >= window.width() * 0.9 &&
+                pb.height() >= b.height() * 3 &&
+                pb.height() <= window.height() * 0.75
+            ) return pb
+            p = p.parent
+            steps++
+        }
+        return b
+    }
 
-        // Check C: a tab labelled "Shorts" is *selected*. This catches the
-        // bottom-bar tab, and also the Shorts tab on channel pages. (The tab is
-        // always visible, so we only react when you're actually on it.)
-        findNode(root) { isSelected(it) && hasLabel(it, SHORTS_TAB_LABELS) }?.let {
-            return "selected tab \"${label(it)}\""
-        }
+    private fun shortsPlayerReason(s: Screen): String? {
+        // Never press Back on Home: it would scroll you to the top or close
+        // YouTube. Shorts rows on Home are covered instead.
+        if (s.homeSelected) return null
+        s.shortsPlayerId?.let { return "full-screen Shorts view (id \"$it\")" }
+        if (s.shortsTabSelected) return "Shorts tab is selected"
         return null
     }
 
-    private fun isBigShortsView(node: AccessibilityNodeInfo, window: Rect): Boolean {
-        if (!containsShortsWord(shortId(node))) return false
-        val b = bounds(node)
-        return b.width() >= window.width() * MIN_WIDTH_SHARE &&
-                b.height() >= window.height() * MIN_HEIGHT_SHARE
-    }
+    private fun boxesFor(s: Screen, window: Rect, blockShorts: Boolean, blockHome: Boolean): List<OverlayManager.Box> {
+        val boxes = mutableListOf<OverlayManager.Box>()
+        // The area between the top bar and the bottom bar.
+        val contentTop = maxOf(s.biggestScrollable?.top ?: window.top, s.topBarBottom, window.top)
+        val contentBottom = minOf(s.barTop, window.bottom)
 
-    /** A tab in YouTube's bottom bar with one of these labels. */
-    private fun isBottomTab(
-        node: AccessibilityNodeInfo,
-        window: Rect,
-        labels: List<String>,
-        mustBeSelected: Boolean,
-    ): Boolean {
-        if (!hasLabel(node, labels)) return false
-        if (mustBeSelected && !isSelected(node)) return false
-        return bounds(node).top >= window.top + window.height() * BOTTOM_BAR_SHARE
+        val coverHome = blockHome && s.homeSelected
+        if (coverHome && contentBottom > contentTop) {
+            boxes += OverlayManager.Box(
+                Rect(window.left, contentTop, window.right, contentBottom),
+                getString(R.string.overlay_home),
+            )
+        }
+
+        if (blockShorts) {
+            s.shortsTab?.let { boxes += OverlayManager.Box(Rect(it), null) }
+            if (!coverHome) {
+                // Biggest first, and skip anything already inside a box.
+                val rows = s.shortsItems
+                    .map { Rect(it).apply { intersect(window.left, contentTop, window.right, contentBottom) } }
+                    .filter { it.width() > 0 && it.height() > 0 && it.top >= contentTop && it.bottom <= contentBottom }
+                    .sortedByDescending { it.width() * it.height() }
+                val kept = mutableListOf<Rect>()
+                for (r in rows) {
+                    if (kept.none { it.contains(r) }) kept += r
+                }
+                kept.forEach { boxes += OverlayManager.Box(it, getString(R.string.overlay_shorts)) }
+            }
+        }
+        return boxes.take(MAX_BOXES)
     }
 
     // ---------------------------------------------------------------------
     // Actions
     // ---------------------------------------------------------------------
 
-    /** Returns true (and starts the cooldown) if we're allowed to act now. */
-    private fun cooldownOver(): Boolean {
-        val now = SystemClock.elapsedRealtime()
-        if (now - lastActionAt < ACTION_COOLDOWN_MS) return false
-        lastActionAt = now
-        return true
-    }
-
     private fun pressBack(reason: String) {
-        if (!cooldownOver()) return
+        val now = SystemClock.elapsedRealtime()
+        if (now < backPausedUntil) return
+        if (now - lastBackAt < BACK_COOLDOWN_MS) return
+
+        // Loop guard: if we keep pressing Back, something is being mistaken
+        // for Shorts. Stop for a while instead of fighting the user.
+        while (recentBacks.isNotEmpty() && now - recentBacks.first() > LOOP_WINDOW_MS) recentBacks.removeFirst()
+        if (recentBacks.size >= LOOP_MAX_BACKS) {
+            recentBacks.clear()
+            backPausedUntil = now + LOOP_PAUSE_MS
+            Prefs.addLog(this, "Pressed Back $LOOP_MAX_BACKS times in 10 s, so pausing Back for 30 s (reason was: $reason)")
+            Log.w(TAG, "Loop guard: pausing Back ($reason)")
+            return
+        }
+
+        recentBacks.addLast(now)
+        lastBackAt = now
         performGlobalAction(GLOBAL_ACTION_BACK)
         Log.i(TAG, "Pressed Back ($reason)")
+        Prefs.addLog(this, "Pressed Back: $reason")
         Toast.makeText(this, "Shorts blocked", Toast.LENGTH_SHORT).show()
     }
 
-    private fun openSubscriptions(root: AccessibilityNodeInfo, window: Rect) {
-        val tab = findNode(root) { isBottomTab(it, window, SUBSCRIPTIONS_TAB_LABELS, mustBeSelected = false) }
-        if (tab == null) {
-            Log.w(TAG, "Home feed is blocked, but I can't find the Subscriptions tab. " +
-                    "Check SUBSCRIPTIONS_TAB_LABELS with debug mode.")
-            return
-        }
-        if (!cooldownOver()) return
+    private fun logCoverChanges(s: Screen, blockHome: Boolean, boxes: List<OverlayManager.Box>) {
+        val homeCovered = blockHome && s.homeSelected
+        if (homeCovered && !homeWasCovered) Prefs.addLog(this, "Covered the Home feed")
+        homeWasCovered = homeCovered
 
-        // The label is sometimes on a view inside the actual button, so walk up
-        // to the nearest view that can be tapped.
-        var target: AccessibilityNodeInfo? = tab
-        var steps = 0
-        while (target != null && !target.isClickable && steps < 4) {
-            target = target.parent
-            steps++
+        val shortsBoxes = boxes.count { it.message == getString(R.string.overlay_shorts) }
+        val now = SystemClock.elapsedRealtime()
+        if (shortsBoxes > 0 && now - lastCoverLogAt > COVER_LOG_INTERVAL_MS) {
+            lastCoverLogAt = now
+            Prefs.addLog(this, "Covered $shortsBoxes Shorts row(s)/item(s)")
         }
-        val tapped = target?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true
-        Log.i(TAG, if (tapped) "Home feed blocked: tapped Subscriptions" else "Couldn't tap Subscriptions")
-        if (tapped) Toast.makeText(this, "Home feed blocked", Toast.LENGTH_SHORT).show()
     }
 
     // ---------------------------------------------------------------------
     // Small helpers
     // ---------------------------------------------------------------------
 
-    /**
-     * Looks at this view, then its children, then their children, and so on,
-     * and returns the first visible view for which test(view) is true.
-     */
-    private fun findNode(
-        node: AccessibilityNodeInfo,
-        depth: Int = 0,
-        test: (AccessibilityNodeInfo) -> Boolean,
-    ): AccessibilityNodeInfo? {
-        if (depth > MAX_DEPTH) return null
-        if (node.isVisibleToUser && test(node)) return node
-        for (i in 0 until node.childCount) {
-            val child = node.getChild(i) ?: continue
-            findNode(child, depth + 1, test)?.let { return it }
+    /** This view or the nearest parent that can be tapped. */
+    private fun clickableAncestor(node: AccessibilityNodeInfo, maxSteps: Int = 4): AccessibilityNodeInfo? {
+        var n: AccessibilityNodeInfo? = node
+        var steps = 0
+        while (n != null && steps <= maxSteps) {
+            if (n.isClickable) return n
+            n = n.parent
+            steps++
         }
         return null
     }
 
-    private fun containsShortsWord(s: String) =
-        SHORTS_ID_WORDS.any { s.contains(it, ignoreCase = true) }
+    private fun containsAny(s: String, words: List<String>) =
+        words.any { s.contains(it, ignoreCase = true) }
 
-    /** The view's description or text, e.g. "Subscriptions". */
-    private fun label(node: AccessibilityNodeInfo) =
-        (node.contentDescription ?: node.text)?.toString()?.trim() ?: ""
+    private fun texts(node: AccessibilityNodeInfo) =
+        listOfNotNull(node.contentDescription, node.text).map { it.toString().trim() }
 
     /**
      * True if the description or text starts with one of the labels. We use
      * "starts with" because YouTube sometimes adds to the label, for example
      * "Subscriptions: New content is available".
      */
-    private fun hasLabel(node: AccessibilityNodeInfo, labels: List<String>): Boolean {
-        val texts = listOfNotNull(node.contentDescription, node.text).map { it.toString().trim() }
-        return texts.any { t -> labels.any { t.startsWith(it, ignoreCase = true) } }
-    }
+    private fun hasLabel(node: AccessibilityNodeInfo, labels: List<String>) =
+        texts(node).any { t -> labels.any { t.startsWith(it, ignoreCase = true) } }
 
-    /** The "selected" flag is sometimes on the tab's parent view, so check both. */
-    private fun isSelected(node: AccessibilityNodeInfo) =
-        node.isSelected || node.parent?.isSelected == true
+    /** True if the description or text is exactly one of the labels. */
+    private fun labelIs(node: AccessibilityNodeInfo, labels: List<String>) =
+        texts(node).any { t -> labels.any { t.equals(it, ignoreCase = true) } }
 
     private fun bounds(node: AccessibilityNodeInfo) = Rect().also { node.getBoundsInScreen(it) }
 
@@ -259,49 +436,72 @@ class ShortsBlockerService : AccessibilityService() {
         node.viewIdResourceName?.substringAfter(":id/") ?: ""
 
     // ---------------------------------------------------------------------
-    // Debug mode: write what's on screen to Logcat
+    // Debug mode: describe the screen (Logcat + a file you can share)
     // ---------------------------------------------------------------------
 
-    private fun dumpScreen(root: AccessibilityNodeInfo, event: AccessibilityEvent) {
+    private fun dumpScreen(
+        root: AccessibilityNodeInfo,
+        event: AccessibilityEvent?,
+        window: Rect,
+        s: Screen,
+        playerReason: String?,
+        boxes: List<OverlayManager.Box>,
+    ) {
         val now = SystemClock.elapsedRealtime()
         if (now - lastDumpAt < DUMP_INTERVAL_MS) return
         lastDumpAt = now
 
-        Log.d(TAG, "===== Screen dump (event: ${AccessibilityEvent.eventTypeToString(event.eventType)}, " +
-                "class: ${event.className}) =====")
+        val out = StringBuilder()
+        out.append("Screen info saved ").append(SimpleDateFormat("HH:mm:ss", Locale.US).format(Date()))
+            .append(" (event: ").append(event?.let { AccessibilityEvent.eventTypeToString(it.eventType) } ?: "settle")
+            .append(")\n")
+        out.append("window=").append(window.toShortString())
+            .append(" homeSelected=").append(s.homeSelected)
+            .append(" shortsTabSelected=").append(s.shortsTabSelected)
+            .append(" shortsTab=").append(s.shortsTab?.toShortString())
+            .append(" barTop=").append(s.barTop)
+            .append(" topBarBottom=").append(s.topBarBottom)
+            .append(" feed=").append(s.biggestScrollable?.toShortString())
+            .append(" playerId=").append(s.shortsPlayerId)
+            .append('\n')
+        out.append("Back reason: ").append(playerReason ?: "none").append('\n')
+        out.append("Boxes: ").append(boxes.joinToString { it.rect.toShortString() }.ifEmpty { "none" }).append("\n\n")
+
         val count = intArrayOf(0)
-        dumpNode(root, 0, count)
-        Log.d(TAG, "===== End of dump (${count[0]} views) =====")
+        dumpNode(root, 0, count, out)
+        out.append("(").append(count[0]).append(" views)\n")
+
+        val text = out.toString()
+        text.lines().forEach { Log.d(TAG, it) }
+        Prefs.saveScreenInfo(this, text)
     }
 
-    private fun dumpNode(node: AccessibilityNodeInfo, depth: Int, count: IntArray) {
+    private fun dumpNode(node: AccessibilityNodeInfo, depth: Int, count: IntArray, out: StringBuilder) {
         if (depth > MAX_DEPTH || count[0] >= MAX_NODES_IN_DUMP) return
         count[0]++
 
-        // Only log views that have something useful: an ID, text or description.
+        // Only list views that have something useful: an ID, text or description,
+        // or that can be tapped/scrolled.
         val id = shortId(node)
         val text = node.text?.toString()?.replace('\n', ' ')
         val desc = node.contentDescription?.toString()?.replace('\n', ' ')
-        if (id.isNotEmpty() || !text.isNullOrBlank() || !desc.isNullOrBlank()) {
-            val b = bounds(node)
-            val line = buildString {
-                append("  ".repeat(depth.coerceAtMost(20)))
-                append(node.className?.toString()?.substringAfterLast('.') ?: "?")
-                if (id.isNotEmpty()) append(" id=").append(id)
-                if (!text.isNullOrBlank()) append(" text=\"").append(text.take(60)).append('"')
-                if (!desc.isNullOrBlank()) append(" desc=\"").append(desc.take(60)).append('"')
-                if (node.isSelected) append(" SELECTED")
-                if (node.isClickable) append(" clickable")
-                if (!node.isVisibleToUser) append(" (hidden)")
-                append(" at y=").append(b.top)
-                append(" size=").append(b.width()).append('x').append(b.height())
-            }
-            Log.d(TAG, line)
+        if (id.isNotEmpty() || !text.isNullOrBlank() || !desc.isNullOrBlank() || node.isClickable || node.isScrollable) {
+            out.append("  ".repeat(depth.coerceAtMost(20)))
+            out.append(node.className?.toString()?.substringAfterLast('.') ?: "?")
+            if (id.isNotEmpty()) out.append(" id=").append(id)
+            if (!text.isNullOrBlank()) out.append(" text=\"").append(text.take(60)).append('"')
+            if (!desc.isNullOrBlank()) out.append(" desc=\"").append(desc.take(80)).append('"')
+            if (node.isSelected) out.append(" SELECTED")
+            if (node.isClickable) out.append(" clickable")
+            if (node.isScrollable) out.append(" scrollable")
+            if (!node.isVisibleToUser) out.append(" (hidden)")
+            out.append(' ').append(bounds(node).toShortString())
+            out.append('\n')
         }
 
         for (i in 0 until node.childCount) {
             val child = node.getChild(i) ?: continue
-            dumpNode(child, depth + 1, count)
+            dumpNode(child, depth + 1, count, out)
         }
     }
 }

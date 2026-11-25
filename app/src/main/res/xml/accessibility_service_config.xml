@@ -2,8 +2,9 @@
 <!--
   Settings for the accessibility service.
 
-  packageNames         Only send us events from the YouTube app. Android won't
-                       tell us anything about any other app.
+  (no packageNames)    We get events from all apps, but only so we notice when
+                       YouTube goes to the background and can remove our boxes.
+                       The code ignores everything that isn't YouTube.
   accessibilityEventTypes
                        Which kinds of events we want:
                        - windowStateChanged: a new screen/popup opened
@@ -14,15 +15,15 @@
   accessibilityFlags   flagReportViewIds: give us view IDs like "reel_recycler".
                        flagIncludeNotImportantViews: include views that
                        TalkBack would normally skip (many IDs live on those).
-  notificationTimeout  Combine events that arrive within 100 ms into one, so we
-                       don't do extra work while YouTube is animating.
+  notificationTimeout  Combine events that arrive within 50 ms into one, so we
+                       don't do extra work while YouTube is animating, but the
+                       boxes still keep up with scrolling.
 -->
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
-    android:packageNames="com.google.android.youtube"
     android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged|typeViewScrolled"
     android:accessibilityFeedbackType="feedbackGeneric"
     android:accessibilityFlags="flagReportViewIds|flagIncludeNotImportantViews"
     android:canRetrieveWindowContent="true"
-    android:notificationTimeout="100"
+    android:notificationTimeout="50"
     android:description="@string/service_description"
     android:settingsActivity="com.example.shortsblocker.MainActivity" />

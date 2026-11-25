@@ -3,55 +3,68 @@
 A small Android app that makes the official YouTube app less of a time sink.
 You choose what it blocks:
 
-- **Shorts.** When the Shorts player or the Shorts tab shows up, it presses
-  **Back** for you.
-- **Home feed** (the recommendations), optional. Whenever YouTube shows Home,
-  it taps **Subscriptions** for you instead. Then the only ways to find videos
-  are **Subscriptions**, **Search** and the **You** tab (History, Watch later,
-  playlists).
+- **Shorts.** The Shorts tab and the Shorts rows in your feeds are covered
+  with plain boxes, so you can't see or tap them. If a Short opens anyway
+  (for example from a link), it presses **Back** for you.
+- **Home feed** (the recommendations), optional. When YouTube shows Home,
+  the feed is covered with a blank "Home feed blocked" panel. Then the only
+  ways to find videos are **Subscriptions**, **Search** and the **You** tab
+  (History, Watch later, playlists).
 
 Normal videos keep playing as usual.
 
 - No internet permission (no permissions at all), no analytics, no data collection.
-- Watches **only** the YouTube app (`com.google.android.youtube`).
+- Only acts on the YouTube app (`com.google.android.youtube`).
 - Plain Kotlin and Android, no libraries.
+
+**Quickest way to install:** on your Android phone, open
+<https://github.com/8seanjones-a11y/knockoffsocialite/releases/download/latest/ShortsBlocker.apk>
+in the browser (not the GitHub app), then go to section 5. GitHub rebuilds
+that file every time the code changes (`.github/workflows/build-apk.yml`).
 
 ---
 
 ## 1. How it works (the short version)
 
 Android has **accessibility services**: apps that can see what's on screen and
-press buttons for you. Screen readers like TalkBack use them. This app is one
-that only listens to YouTube.
+press buttons for you. Screen readers like TalkBack use them. This app is one.
+It gets events from every app, but only so it can tell when YouTube goes to
+the background (then it removes its boxes). It ignores everything else.
 
-Each time YouTube's screen changes, `ShortsBlockerService.kt` looks through the
-views on screen.
+An app can't delete anything from inside another app, but an accessibility
+service may draw **overlay boxes** on top of it, without any extra
+permission. Each time YouTube's screen changes (including while you scroll),
+`ShortsBlockerService.kt` looks through the views on screen once and decides
+what to cover (`OverlayManager.kt` draws the boxes):
 
-**Shorts** (if ticked). It asks three questions:
+| What | How it's found | What happens |
+|------|----------------|--------------|
+| Shorts tab | The bottom-bar tab labelled "Shorts" | Covered |
+| Shorts rows in feeds | A "Shorts" heading (the row is covered), views whose ID contains `reel`/`shorts`, and items described as "… play Short" | Covered |
+| Home feed (if ticked) | The bottom-bar **Home** tab is selected | Everything between the top bar and the bottom bar is covered. Search, the top bar and the tabs stay usable. |
+| Shorts player | A view ≥70% wide and ≥60% tall whose ID contains `reel`/`shorts`, or the bottom-bar Shorts tab is selected | Presses **Back** |
 
-| # | Check | Why it's reliable |
-|---|-------|-------------------|
-| 1 | Is there a **big view** (≥70% wide, ≥60% tall) whose **view ID** contains `reel` or `shorts`? | "Reel" is YouTube's internal name for Shorts, used in IDs like `reel_recycler`. The size rule ignores the small Shorts row on the Home feed. |
-| 2 | Is a tab or button labelled **"Shorts"** currently **selected**? | Catches the bottom-bar Shorts tab (and the Shorts tab on channel pages). The label "Shorts" is the same in almost every language. |
-| 3 | Does the **name of the screen** that just opened contain `Reel` or `Shorts`? | A different signal in case the IDs change. |
+Safety rules for Back, so it can't fight you:
 
-If any check says yes, it presses Back (at most once every 1.2 s, so it can't
-get stuck pressing Back over and over) and shows a "Shorts blocked" toast.
+- It **never** presses Back while the Home tab is selected. (On YouTube, Back
+  on Home scrolls to the top and then closes the app.)
+- At most once every 1.2 s.
+- **Loop guard:** after 3 Backs within 10 s it stops pressing Back for 30 s,
+  and writes that in *Recent activity*.
 
-**Home feed** (if ticked). If the **Home** tab in the bottom bar is selected,
-it taps the **Subscriptions** tab. It doesn't press Back, because Home is
-YouTube's first screen and Back would just close the app. "Bottom bar" means
-the bottom 20% of the window, so the "Home" tab on a channel's page is left
-alone. When you open YouTube you'll land on Subscriptions.
+The boxes may lag a split second behind while you scroll, and scrolling
+can't start on a box (start the swipe somewhere else).
 
 ### The main screen
 
 | Control | What it does |
 |---------|--------------|
 | **Blocker on** | Main switch. Off = nothing is blocked. |
-| **Shorts** ☑ | Block Shorts (on by default). |
-| **Home feed** ☐ | Replace Home with Subscriptions (off by default). |
-| **Debug logging** | Write what's on screen to Logcat (section 7). |
+| **Shorts** ☑ | Cover Shorts / close the Shorts player (on by default). |
+| **Home feed** ☐ | Cover the Home feed (off by default). |
+| **Debug mode** | Saves a description of the last YouTube screen (section 7). |
+| **Recent activity** | The last 30 things the blocker did (Back presses and why, loop guard, covering). |
+| **Share screen info** | Sends the recent activity plus the saved screen (if debug mode is on) to any app, so you can paste it when asking for help. |
 
 ### What it can't block
 
@@ -64,13 +77,13 @@ far fewer recommendations everywhere.
 ### Not using YouTube in English?
 
 "Shorts" is the same word in almost every language, but **Home** and
-**Subscriptions** are translated. If Home blocking doesn't work, use debug
-mode to see your tab labels (`desc="..."` at the bottom of the screen) and add
-them in `ShortsBlockerService.kt`:
+**Search** are translated. If Home blocking doesn't work, use debug mode to see
+your tab labels (`desc="..."` at the bottom of the screen) and add them in
+`ShortsBlockerService.kt`:
 
 ```kotlin
 val HOME_TAB_LABELS = listOf("Home", "Startseite")
-val SUBSCRIPTIONS_TAB_LABELS = listOf("Subscriptions", "Abos")
+val SEARCH_LABELS = listOf("Search", "Suchen")
 ```
 
 ### Project files
@@ -79,10 +92,12 @@ val SUBSCRIPTIONS_TAB_LABELS = listOf("Subscriptions", "Abos")
 app/src/main/
   AndroidManifest.xml                  what's in the app (one screen, one service, no permissions)
   java/com/example/shortsblocker/
-    ShortsBlockerService.kt            the blocker (detection + Back + debug logging)
+    ShortsBlockerService.kt            the blocker (detection, Back, debug screen info)
+    OverlayManager.kt                  draws the boxes that cover things
     MainActivity.kt                    the main screen
-    Prefs.kt                           saves the two switches
-  res/xml/accessibility_service_config.xml   "only YouTube, give me view IDs"
+    Prefs.kt                           saves the switches, recent activity and screen info
+  res/xml/accessibility_service_config.xml   "give me screen changes and view IDs"
+.github/workflows/build-apk.yml        builds the APK on GitHub and publishes it
   res/layout/activity_main.xml         main screen layout
   res/values/strings.xml               all the text
 debug.keystore                         signing key for debug builds (see note below)
@@ -281,23 +296,21 @@ With the service on, **Blocker on** switched on and **Shorts** ticked:
 
 | Try this | Expected |
 |----------|----------|
-| Open YouTube, tap the **Shorts** tab | You're sent straight back, with a "Shorts blocked" toast |
-| Tap a Short in the Home feed's Shorts row | The player closes immediately |
-| Open a Shorts link (`youtube.com/shorts/…`) from another app | Blocked. Back may close YouTube if the Short was the first screen. |
-| Scroll the Home feed past the Shorts row | Nothing happens (the row itself is allowed) |
-| Play a normal video, search, open Subscriptions, Library | Everything works normally |
-| Turn **Blocker on** off in the app, open Shorts | Shorts play (the switch pauses blocking) |
+| Open YouTube | The Shorts tab in the bottom bar is a blank box and can't be tapped |
+| Scroll Home / Subscriptions past a Shorts row | The row is covered with a "Shorts hidden" box |
+| Open a Shorts link (`youtube.com/shorts/…`) from another app | Closed with a "Shorts blocked" toast. Back may close YouTube if the Short was the first screen. |
+| Scroll, tap Subscriptions, play a normal video, search, open You | Everything works normally. No jumping to the top. |
+| Turn **Blocker on** off in the app, go back to YouTube | All boxes are gone |
 
 Now tick **Home feed** too:
 
 | Try this | Expected |
 |----------|----------|
-| Open YouTube | It switches to Subscriptions, with a "Home feed blocked" toast |
-| Tap the **Home** tab | Same: back to Subscriptions |
+| Open YouTube on Home | The feed is covered by "Home feed blocked"; the top bar and tabs still work |
+| Tap **Subscriptions**, **Search**, **You** | Works normally |
 | Open a channel and tap its own "Home" tab | Works normally (it's not the bottom bar) |
-| Search, open You → History / Watch later | Works normally |
 
-You may see the Short for a split second before Back fires. That's normal.
+If something misbehaves, open Shorts Blocker and look at **Recent activity**.
 
 ---
 
@@ -306,8 +319,20 @@ You may see the Short for a split second before Back fires. That's normal.
 If a YouTube update breaks the blocker, debug mode shows you what YouTube's
 screen is made of so you can fix it.
 
+### On the phone only (no PC)
+
+1. In Shorts Blocker, turn on **Debug mode**.
+2. Open YouTube and go to the screen that's wrong (for example a Shorts row
+   that isn't covered). Wait 2–3 seconds.
+3. Switch back to Shorts Blocker, tap **Share screen info**, and send it to
+   yourself (notes, email, chat). It contains the recent activity and a list
+   of the views that were on that screen.
+4. Turn debug mode off again. It uses a little extra battery.
+
+### With a PC (Logcat)
+
 1. Connect the phone over USB (section 4, Option A).
-2. In Shorts Blocker, turn on **Debug logging**. You can turn **Blocker on**
+2. In Shorts Blocker, turn on **Debug mode**. You can turn **Blocker on**
    off while you look, so the blocker doesn't close things on you. (Debug
    mode still logs what it *would* have blocked.)
 3. In PowerShell, clear old logs and start watching:
@@ -323,19 +348,19 @@ screen is made of so you can fix it.
 4. Open YouTube and go to a Short. Every 2 seconds you get a screen dump like:
 
    ```
-   D ShortsBlocker: ===== Screen dump (event: TYPE_WINDOW_CONTENT_CHANGED, class: android.widget.FrameLayout) =====
-   D ShortsBlocker:     FrameLayout id=reel_player_page_container size=1080x2201
-   D ShortsBlocker:       RecyclerView id=reel_recycler size=1080x2201
-   D ShortsBlocker:         Button desc="Like this video along with 12K other people" size=132x132
-   D ShortsBlocker:   Button desc="Shorts" SELECTED clickable at y=2190 size=216x150
-   D ShortsBlocker: ===== End of dump (187 views) =====
-   I ShortsBlocker: Shorts detected: full-screen view with id "reel_player_page_container"
-   I ShortsBlocker: Pressed Back (full-screen view with id "reel_player_page_container")
+   D ShortsBlocker: Screen info saved 14:03:12 (event: TYPE_WINDOW_CONTENT_CHANGED)
+   D ShortsBlocker: window=[0,0][1080,2340] homeSelected=false shortsTabSelected=true ...
+   D ShortsBlocker: Back reason: full-screen Shorts view (id "reel_player_page_container")
+   D ShortsBlocker:     FrameLayout id=reel_player_page_container [0,0][1080,2201]
+   D ShortsBlocker:       RecyclerView id=reel_recycler scrollable [0,0][1080,2201]
+   D ShortsBlocker:         Button desc="Like this video along with 12K other people" clickable [930,1500][1062,1632]
+   D ShortsBlocker:   Button desc="Shorts" SELECTED clickable [432,2190][648,2340]
+   I ShortsBlocker: Pressed Back (full-screen Shorts view (id "reel_player_page_container"))
    ```
 
    Each line is one view: its type, `id=`, `text=`, `desc=` (content
    description), `SELECTED` if it's the active tab, `clickable` if it can be
-   tapped, how far down the screen it starts (`y=`), and its size in pixels.
+   tapped, and where it is on screen as `[left,top][right,bottom]` in pixels.
    Indentation shows which views are inside which.
 
 5. **If Shorts aren't blocked any more:** look for an `id=` on a view that
@@ -350,9 +375,9 @@ screen is made of so you can fix it.
    Pick something that won't appear in normal videos (check a normal video's
    dump too). Then rebuild (section 3) and reinstall with `adb install -r …`.
 
-6. **If something normal gets blocked by mistake:** the `Shorts detected: …`
-   line says which check fired and on which ID, so you know what to make more
-   specific.
+6. **If something normal gets blocked by mistake:** the `Back reason:` line
+   (and *Recent activity*) says which check fired and on which ID, so you know
+   what to make more specific.
 
 Turn debug logging off when you're done. It uses a little extra battery.
 
@@ -366,4 +391,5 @@ Turn debug logging off when you're done. It uses a little extra battery.
 | `INSTALL_FAILED_UPDATE_INCOMPATIBLE` | An older copy was signed with a different key. Uninstall it (`adb uninstall com.example.shortsblocker`) and install again. |
 | `adb devices` shows `unauthorized` | Unlock the phone and accept the "Allow USB debugging?" popup. |
 | Nothing is blocked | Check the main screen says ✅, **Blocker on** is on, the right boxes are ticked, and battery is Unrestricted. Then use debug mode (section 7). |
-| Logcat says "can't find the Subscriptions tab" | Your tab label is different (another language, or YouTube renamed it). See "Not using YouTube in English?" in section 1. |
+| The Home feed isn't covered | Your tab label is different (another language, or YouTube renamed it). See "Not using YouTube in English?" in section 1. |
+| Recent activity says "pausing Back for 30 s" | Something normal was mistaken for Shorts. Turn on debug mode, open that screen, and use **Share screen info** (section 7). |
