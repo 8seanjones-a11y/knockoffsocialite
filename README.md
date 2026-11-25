@@ -41,12 +41,12 @@ what to cover (`OverlayManager.kt` draws the boxes):
 |------|----------------|--------------|
 | Shorts tab | The bottom-bar tab labelled "Shorts" | Covered |
 | Shorts rows in feeds | A "Shorts" heading (the row is covered), views whose ID contains `reel`/`shorts`, and items described as "… play Short" | Covered |
-| Home feed (if ticked) | The bottom-bar **Home** tab is selected | Everything between the top bar and the bottom bar is covered. Search, the top bar and the tabs stay usable. |
+| Home feed (if ticked) | The bottom-bar **Home** tab is selected **and** the top bar has no back arrow or search box. (YouTube keeps Home selected on search results and channels opened from Home, but those have a back arrow.) | Everything between the top bar and the bottom bar is covered. Search, search results, the top bar and the tabs stay usable. |
 | Shorts player | A view ≥70% wide and ≥60% tall whose ID contains `reel`/`shorts`, or the bottom-bar Shorts tab is selected | Presses **Back** |
 
 Safety rules for Back, so it can't fight you:
 
-- It **never** presses Back while the Home tab is selected. (On YouTube, Back
+- It **never** presses Back on the Home feed. (On YouTube, Back
   on Home scrolls to the top and then closes the app.)
 - At most once every 1.2 s.
 - **Loop guard:** after 3 Backs within 10 s it stops pressing Back for 30 s,
@@ -84,6 +84,7 @@ your tab labels (`desc="..."` at the bottom of the screen) and add them in
 ```kotlin
 val HOME_TAB_LABELS = listOf("Home", "Startseite")
 val SEARCH_LABELS = listOf("Search", "Suchen")
+val BACK_LABELS = listOf("Navigate up", "Back", "Nach oben")
 ```
 
 ### Project files
@@ -308,6 +309,7 @@ Now tick **Home feed** too:
 |----------|----------|
 | Open YouTube on Home | The feed is covered by "Home feed blocked"; the top bar and tabs still work |
 | Tap **Subscriptions**, **Search**, **You** | Works normally |
+| Search for something | The results are visible (Shorts in them are covered) |
 | Open a channel and tap its own "Home" tab | Works normally (it's not the bottom bar) |
 
 If something misbehaves, open Shorts Blocker and look at **Recent activity**.

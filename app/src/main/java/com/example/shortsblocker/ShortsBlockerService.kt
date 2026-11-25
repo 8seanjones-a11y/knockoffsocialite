@@ -56,6 +56,19 @@ class ShortsBlockerService : AccessibilityService() {
         val OTHER_TAB_LABELS = listOf("Subscriptions", "You", "Create", "Library")
         val SEARCH_LABELS = listOf("Search")
 
+        /**
+         * The back arrow in the top bar. YouTube keeps the Home tab selected
+         * on search results and channel pages you open from Home, but those
+         * always have a back arrow; the real Home feed doesn't.
+         */
+        val BACK_LABELS = listOf("Navigate up", "Back")
+
+        /** The YouTube logo in the top bar (only logged, to help debugging). */
+        val LOGO_LABELS = listOf("YouTube")
+
+        /** The back arrow and logo sit in the top part of the window. */
+        const val TOP_BAR_STRICT_SHARE = 0.12
+
         /** A view counts as the Shorts *player* if it is at least this big. */
         const val MIN_WIDTH_SHARE = 0.7
         const val MIN_HEIGHT_SHARE = 0.6
@@ -193,7 +206,13 @@ class ShortsBlockerService : AccessibilityService() {
     /** What we found on screen in one pass over the views. */
     private class Screen {
         var homeSelected = false
+        var hasBackButton = false
+        var hasSearchField = false
+        var hasLogo = false
         var shortsTabSelected = false
+
+        /** The actual Home feed, not a search result or page opened from Home. */
+        val isHomeFeed get() = homeSelected && !hasBackButton && !hasSearchField
         var shortsTab: Rect? = null
         var barTop = Int.MAX_VALUE          // top of the bottom bar
         var topBarBottom = Int.MIN_VALUE    // bottom of the search button
@@ -238,6 +257,13 @@ class ShortsBlockerService : AccessibilityService() {
                 }
             }
             return
+        }
+
+        // Top bar: back arrow, search box or logo tell us which page this is.
+        if (b.bottom <= window.top + window.height() * TOP_BAR_STRICT_SHARE) {
+            if (labelIs(node, BACK_LABELS)) s.hasBackButton = true
+            if (node.className?.toString()?.contains("EditText") == true) s.hasSearchField = true
+            if (hasLabel(node, LOGO_LABELS)) s.hasLogo = true
         }
 
         // Search button: the Home cover starts below it.
@@ -314,11 +340,13 @@ class ShortsBlockerService : AccessibilityService() {
     }
 
     private fun shortsPlayerReason(s: Screen): String? {
-        // Never press Back on Home: it would scroll you to the top or close
-        // YouTube. Shorts rows on Home are covered instead.
-        if (s.homeSelected) return null
+        // Never press Back on the Home feed: it would scroll you to the top or
+        // close YouTube. Shorts rows there are covered instead.
+        if (s.isHomeFeed) return null
         s.shortsPlayerId?.let { return "full-screen Shorts view (id \"$it\")" }
-        if (s.shortsTabSelected) return "Shorts tab is selected"
+        // Pages opened from Home (search results, channels) keep Home selected,
+        // so only trust the Shorts tab when Home isn't selected.
+        if (s.shortsTabSelected && !s.homeSelected) return "Shorts tab is selected"
         return null
     }
 
@@ -328,7 +356,7 @@ class ShortsBlockerService : AccessibilityService() {
         val contentTop = maxOf(s.biggestScrollable?.top ?: window.top, s.topBarBottom, window.top)
         val contentBottom = minOf(s.barTop, window.bottom)
 
-        val coverHome = blockHome && s.homeSelected
+        val coverHome = blockHome && s.isHomeFeed
         if (coverHome && contentBottom > contentTop) {
             boxes += OverlayManager.Box(
                 Rect(window.left, contentTop, window.right, contentBottom),
@@ -383,7 +411,7 @@ class ShortsBlockerService : AccessibilityService() {
     }
 
     private fun logCoverChanges(s: Screen, blockHome: Boolean, boxes: List<OverlayManager.Box>) {
-        val homeCovered = blockHome && s.homeSelected
+        val homeCovered = blockHome && s.isHomeFeed
         if (homeCovered && !homeWasCovered) Prefs.addLog(this, "Covered the Home feed")
         homeWasCovered = homeCovered
 
@@ -457,6 +485,10 @@ class ShortsBlockerService : AccessibilityService() {
             .append(")\n")
         out.append("window=").append(window.toShortString())
             .append(" homeSelected=").append(s.homeSelected)
+            .append(" back=").append(s.hasBackButton)
+            .append(" searchField=").append(s.hasSearchField)
+            .append(" logo=").append(s.hasLogo)
+            .append(" homeFeed=").append(s.isHomeFeed)
             .append(" shortsTabSelected=").append(s.shortsTabSelected)
             .append(" shortsTab=").append(s.shortsTab?.toShortString())
             .append(" barTop=").append(s.barTop)

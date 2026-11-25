@@ -114,6 +114,10 @@ class OverlayManager(private val service: AccessibilityService) {
         y = rect.top
         windowAnimations = 0
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            // By default Android 11+ moves windows clear of the status bar,
+            // which pushed every box down by the status bar's height (so the
+            // Home panel slid over the bottom tabs). Place them exactly.
+            fitInsetsTypes = 0
             layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
         } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
