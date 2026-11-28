@@ -15,8 +15,8 @@ android {
         applicationId = "com.example.shortsblocker"
         minSdk = 26        // Android 8.0 or newer
         targetSdk = 35     // Android 15
-        versionCode = 6
-        versionName = "1.5"
+        versionCode = 7
+        versionName = "1.6"
     }
 
     // Every APK must be signed. Debug builds normally use a key that is

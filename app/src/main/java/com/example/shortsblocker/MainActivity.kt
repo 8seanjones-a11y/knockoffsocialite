@@ -43,6 +43,10 @@ class MainActivity : Activity() {
         blockHome.isChecked = Prefs.isBlockHomeOn(this)
         blockHome.setOnCheckedChangeListener { _, on -> Prefs.setBlockHomeOn(this, on) }
 
+        val blockSubs = findViewById<CheckBox>(R.id.blockSubs)
+        blockSubs.isChecked = Prefs.isBlockSubsOn(this)
+        blockSubs.setOnCheckedChangeListener { _, on -> Prefs.setBlockSubsOn(this, on) }
+
         // "Debug mode" switch.
         val debugSwitch = findViewById<Switch>(R.id.debugSwitch)
         debugSwitch.isChecked = Prefs.isDebugOn(this)

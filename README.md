@@ -4,14 +4,17 @@ A small Android app that makes the official YouTube app less of a time sink.
 You choose what it blocks:
 
 - **Shorts.** If you open the Shorts tab or a Short (from a row or a link),
-  it presses **Back** for you.
-- **Home feed** (the recommendations), optional. When YouTube shows Home, it
-  taps **Subscriptions** for you. Then the only ways to find videos are
-  **Subscriptions**, **Search** and the **You** tab (History, Watch later,
+  it presses **Back** for you. Shorts rows in feeds, search results and under
+  videos get covered with a box, but only after you've stopped scrolling for
+  **3 seconds**, so it only bothers you when you're actually looking at them.
+  The moment you scroll or tap again, the boxes go away and the 3 seconds
+  start over. You can scroll straight through the boxes.
+- **Home feed** and **Subscriptions feed**, each optional. They're covered
+  with a blank "Feed blocked" panel. Then the only ways to find videos are
+  **Search** and the **You** tab (History, Continue watching, Watch later,
   playlists).
 
-It never draws anything on top of YouTube, so nothing can get stuck on your
-screen. Normal videos keep playing as usual.
+Normal videos keep playing as usual.
 
 - No internet permission (no permissions at all), no analytics, no data collection.
 - Only acts on the YouTube app (`com.google.android.youtube`).
@@ -27,26 +30,38 @@ that file every time the code changes (`.github/workflows/build-apk.yml`).
 ## 1. How it works (the short version)
 
 Android has **accessibility services**: apps that can see what's on screen and
-press buttons for you. Screen readers like TalkBack use them. This app is one
-that only listens to YouTube.
+press buttons for you. Screen readers like TalkBack use them. This app is one.
+It gets events from every app, but only so it can tell when YouTube goes to
+the background (then it removes its boxes). It ignores everything else.
 
-Each time YouTube's screen changes, `ShortsBlockerService.kt` looks through
-the views on screen once and decides what to do:
+An app can't delete anything from inside another app, but an accessibility
+service may draw **overlay boxes** on top of it, without any extra
+permission (`OverlayManager.kt`). Each time YouTube's screen changes,
+`ShortsBlockerService.kt` looks through the views on screen once and decides
+what to do:
 
 | What | How it's found | What happens |
 |------|----------------|--------------|
-| Shorts player | A view ≥70% wide and ≥60% tall whose ID contains `reel`/`shorts` (on the Home feed: ≥85% tall) | Presses **Back** |
-| Shorts tab | The bottom-bar Shorts tab is selected | Presses **Back** |
-| Shorts rows in feeds | – | Left alone. Opening one opens the player, which is closed. |
-| Home feed (if ticked) | The bottom-bar **Home** tab is selected **and** there's no back arrow or search box in the top bar **and** no video player on screen. (YouTube keeps Home selected on search results, channels and videos opened from Home.) Checked once the screen has been still for 0.3 s. | Taps **Subscriptions** |
+| Shorts player | A view ≥70% wide and ≥60% tall whose ID contains `reel`/`shorts` (on a feed: ≥85% tall) | Presses **Back** straight away |
+| Shorts tab | The bottom-bar Shorts tab is selected | Presses **Back** straight away |
+| Shorts rows and items | IDs containing `reel`/`shorts`, descriptions containing "play Short", and rows under a "Shorts" heading | Covered with a "Shorts hidden" box **after 3 s without scrolling or tapping**. Removed the moment you move. Touches go through, so you can scroll past. |
+| Home / Subscriptions feed (if ticked) | That bottom-bar tab is selected **and** there's no back arrow or search box in the top bar **and** no video player on screen. (YouTube keeps Home selected on search results, channels and videos opened from Home.) | Covered straight away by a "Feed blocked" panel that catches touches, so the feed can't be scrolled or tapped. The top bar (Search) and the bottom tabs stay usable. |
 
-Safety rules, so it can't fight you:
+Two fixes over the earlier box version:
 
-- On the Home feed it only presses Back for a Shorts player that fills the
-  screen. (On YouTube, Back on Home scrolls to the top and then closes the app.)
-- At most one action every 1.2 s.
-- **Loop guard:** after 3 actions within 10 s it does nothing for 30 s, and
-  writes that in *Recent activity*.
+- **The panel never covers the whole screen.** If the top bar has scrolled
+  away, it uses where the top bar was last time.
+- **It doesn't stay over videos.** A video counts as playing when player
+  buttons ("Pause video", "Enter fullscreen", …) or a video-shaped player view
+  are in the top part of the screen. Then nothing is covered.
+
+Safety rules for Back, so it can't fight you:
+
+- On a feed it only presses Back for a Shorts player that fills the screen.
+  (On YouTube, Back on Home scrolls to the top and then closes the app.)
+- At most once every 1.2 s.
+- **Loop guard:** after 3 Backs within 10 s it stops pressing Back for 30 s,
+  and writes that in *Recent activity*.
 
 
 ### The main screen
@@ -54,10 +69,11 @@ Safety rules, so it can't fight you:
 | Control | What it does |
 |---------|--------------|
 | **Blocker on** | Main switch. Off = nothing is blocked. |
-| **Shorts** ☑ | Close the Shorts tab and Shorts player (on by default). |
-| **Home feed** ☐ | Switch Home to Subscriptions (off by default). |
+| **Shorts** ☑ | Close the Shorts tab and Shorts player; hide Shorts rows after 3 s still (on by default). |
+| **Home feed** ☐ | Cover the Home feed (off by default). |
+| **Subscriptions feed** ☑ | Cover the Subscriptions feed (on by default). |
 | **Debug mode** | Saves a description of the last YouTube screen (section 7). |
-| **Recent activity** | The last 30 things the blocker did (Back presses, switches to Subscriptions, loop guard). |
+| **Recent activity** | The last 30 things the blocker did (Back presses, covering, loop guard). |
 | **Share screen info** | Sends the recent activity plus the saved screen (if debug mode is on) to any app, so you can paste it when asking for help. |
 
 ### What it can't block
@@ -88,9 +104,10 @@ app/src/main/
   AndroidManifest.xml                  what's in the app (one screen, one service, no permissions)
   java/com/example/shortsblocker/
     ShortsBlockerService.kt            the blocker (detection, Back, debug screen info)
+    OverlayManager.kt                  draws the boxes that cover things
     MainActivity.kt                    the main screen
     Prefs.kt                           saves the switches, recent activity and screen info
-  res/xml/accessibility_service_config.xml   "only YouTube, give me view IDs"
+  res/xml/accessibility_service_config.xml   "give me screen changes, taps and view IDs"
 .github/workflows/build-apk.yml        builds the APK on GitHub and publishes it
   res/layout/activity_main.xml         main screen layout
   res/values/strings.xml               all the text
@@ -291,19 +308,21 @@ With the service on, **Blocker on** switched on and **Shorts** ticked:
 | Try this | Expected |
 |----------|----------|
 | Tap the **Shorts** tab | You're sent straight back, with a "Shorts blocked" toast |
-| Tap a Short in a Shorts row (Home, Subscriptions, search) | It closes again, with a "Shorts blocked" toast |
+| Search for something with Shorts in the results, then stop scrolling | After 3 s the Shorts are covered by "Shorts hidden" boxes |
+| Scroll again | The boxes disappear straight away; stop for 3 s and they come back |
+| Tap a Short in a Shorts row (before it's covered) | It closes again, with a "Shorts blocked" toast |
 | Open a Shorts link (`youtube.com/shorts/…`) from another app | Closed with a "Shorts blocked" toast. Back may close YouTube if the Short was the first screen. |
 | Scroll, tap Subscriptions, play a normal video, search, open You | Everything works normally. No jumping to the top. |
-| Turn **Blocker on** off in the app, go back to YouTube | Shorts play again |
+| Turn **Blocker on** off in the app, go back to YouTube | All boxes are gone |
 
-Now tick **Home feed** too:
+Now tick **Home feed** and **Subscriptions feed** too:
 
 | Try this | Expected |
 |----------|----------|
-| Open YouTube | It switches to Subscriptions, with a "Home feed blocked" toast |
-| Tap the **Home** tab | Same: back to Subscriptions |
-| Tap **Search** and search for something | The results stay visible |
-| Play a video, then let it play for a few minutes | Nothing happens; the video keeps playing |
+| Open YouTube on Home | The feed is covered by "Feed blocked"; the top bar and tabs still work |
+| Tap **Subscriptions** | Covered the same way |
+| Tap **Search** and search for something | The results are visible |
+| Tap **You**, open Continue watching / History and play a video | The video plays with nothing over it, even after a few minutes |
 | Open a channel and tap its own "Home" tab | Works normally (it's not the bottom bar) |
 
 If something misbehaves, open Shorts Blocker and look at **Recent activity**.
@@ -387,5 +406,6 @@ Turn debug logging off when you're done. It uses a little extra battery.
 | `INSTALL_FAILED_UPDATE_INCOMPATIBLE` | An older copy was signed with a different key. Uninstall it (`adb uninstall com.example.shortsblocker`) and install again. |
 | `adb devices` shows `unauthorized` | Unlock the phone and accept the "Allow USB debugging?" popup. |
 | Nothing is blocked | Check the main screen says ✅, **Blocker on** is on, the right boxes are ticked, and battery is Unrestricted. Then use debug mode (section 7). |
-| Home doesn't switch to Subscriptions | Your tab label is different (another language, or YouTube renamed it). See "Not using YouTube in English?" in section 1. |
-| Recent activity says "pausing for 30 s" | Something normal was mistaken for Shorts or Home. Turn on debug mode, open that screen, and use **Share screen info** (section 7). |
+| A feed isn't covered | Your tab label is different (another language, or YouTube renamed it). See "Not using YouTube in English?" in section 1. |
+| A box stays over a video | The video player wasn't recognised. Turn on debug mode, play the video, and use **Share screen info**: look at `watching=` on the second line. |
+| Recent activity says "pausing Back for 30 s" | Something normal was mistaken for Shorts. Turn on debug mode, open that screen, and use **Share screen info** (section 7). |

@@ -2,13 +2,17 @@
 <!--
   Settings for the accessibility service.
 
-  packageNames         Only send us events from the YouTube app. Android won't
-                       tell us anything about any other app.
+  (no packageNames)    We get events from all apps, but only so we notice when
+                       YouTube goes to the background and can remove our boxes.
+                       The code ignores everything that isn't YouTube.
   accessibilityEventTypes
                        Which kinds of events we want:
                        - windowStateChanged: a new screen/popup opened
                        - windowContentChanged: something on screen changed
-                       - viewScrolled: you swiped (e.g. to the next Short)
+                       - viewScrolled: you scrolled
+                       - viewClicked: you tapped something
+                       (scrolling and tapping restart the 3-second timer
+                       before Shorts rows are covered)
   canRetrieveWindowContent
                        Lets us look at the views on screen (needed to spot Shorts).
   accessibilityFlags   flagReportViewIds: give us view IDs like "reel_recycler".
@@ -18,8 +22,7 @@
                        don't do extra work while YouTube is animating.
 -->
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
-    android:packageNames="com.google.android.youtube"
-    android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged|typeViewScrolled"
+    android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged|typeViewScrolled|typeViewClicked"
     android:accessibilityFeedbackType="feedbackGeneric"
     android:accessibilityFlags="flagReportViewIds|flagIncludeNotImportantViews"
     android:canRetrieveWindowContent="true"

@@ -15,6 +15,7 @@ object Prefs {
     private const val KEY_BLOCKING = "blocking"
     private const val KEY_BLOCK_SHORTS = "block_shorts"
     private const val KEY_BLOCK_HOME = "block_home"
+    private const val KEY_BLOCK_SUBS = "block_subscriptions"
     private const val KEY_DEBUG = "debug"
 
     private fun prefs(context: Context) =
@@ -30,13 +31,17 @@ object Prefs {
     fun isBlockingOn(c: Context) = get(c, KEY_BLOCKING, true)
     fun setBlockingOn(c: Context, on: Boolean) = set(c, KEY_BLOCKING, on)
 
-    /** Cover the Shorts tab and close the Shorts player. On by default. */
+    /** Close the Shorts player/tab and hide Shorts rows once you stop scrolling. On by default. */
     fun isBlockShortsOn(c: Context) = get(c, KEY_BLOCK_SHORTS, true)
     fun setBlockShortsOn(c: Context, on: Boolean) = set(c, KEY_BLOCK_SHORTS, on)
 
     /** Cover the Home feed (recommendations). Off by default. */
     fun isBlockHomeOn(c: Context) = get(c, KEY_BLOCK_HOME, false)
     fun setBlockHomeOn(c: Context, on: Boolean) = set(c, KEY_BLOCK_HOME, on)
+
+    /** Cover the Subscriptions feed. On by default. */
+    fun isBlockSubsOn(c: Context) = get(c, KEY_BLOCK_SUBS, true)
+    fun setBlockSubsOn(c: Context, on: Boolean) = set(c, KEY_BLOCK_SUBS, on)
 
     /** Debug mode: save screen info (and log to Logcat). Off by default. */
     fun isDebugOn(c: Context) = get(c, KEY_DEBUG, false)

@@ -3,15 +3,18 @@
 <resources>
     <string name="app_name">Shorts Blocker</string>
 
-    <string name="service_description">Works only in the YouTube app. It presses Back when a Short or the Shorts tab opens and, if you choose, switches the Home feed to Subscriptions. It never draws anything on top of YouTube, reads nothing from other apps and has no internet access.</string>
+    <string name="service_description">Works only in the YouTube app. It presses Back when a Short or the Shorts tab opens, hides Shorts rows once you stop scrolling and, if you choose, covers the Home and Subscriptions feeds. Other apps are ignored (it only notices when YouTube goes to the background). It has no internet access.</string>
 
     <string name="how_to">How to turn it on:\n1. Tap “Open Accessibility Settings”.\n2. Find “Shorts Blocker” (often under “Downloaded apps” or “Installed apps”) and switch it on.\n3. If the switch is greyed out (Android 13+), tap “Open App Info”, then ⋮ (top right) → “Allow restricted settings”, and try step 2 again.</string>
 
     <string name="blocking_switch">Blocker on</string>
     <string name="what_to_block">What to block</string>
-    <string name="block_shorts">Shorts (tab and player)</string>
+    <string name="block_shorts">Shorts (closes Shorts; hides Shorts rows after 3 s without scrolling)</string>
     <string name="block_home">Home feed (recommendations)</string>
-    <string name="block_home_hint">Opening Home switches you to Subscriptions. Search, channels, videos, History, Watch later and playlists still work.</string>
+    <string name="block_subs">Subscriptions feed</string>
+    <string name="block_home_hint">Ticked feeds are covered with a blank panel. Search and the You tab (History, Continue watching, Watch later, playlists) still work.</string>
+    <string name="overlay_feed">Feed blocked\nUse Search or You</string>
+    <string name="overlay_shorts">Shorts hidden</string>
     <string name="debug_switch">Debug mode (saves screen info you can share)</string>
     <string name="open_accessibility">Open Accessibility Settings</string>
     <string name="open_app_info">Open App Info</string>
