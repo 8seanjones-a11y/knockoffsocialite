@@ -42,7 +42,7 @@ what to do:
 
 | What | How it's found | What happens |
 |------|----------------|--------------|
-| Shorts player | A view ≥70% wide and ≥60% tall whose ID contains `reel`/`shorts` (on a feed: ≥85% tall) | Presses **Back** straight away |
+| Shorts player | A view ≥70% wide and ≥60% tall whose ID contains `reel`/`shorts`, except `time_bar` ones, which YouTube leaves on Home and video pages (on a feed: ≥85% tall) | Presses **Back** straight away |
 | Shorts tab | The bottom-bar Shorts tab is selected | Presses **Back** straight away |
 | Shorts rows and items | IDs containing `reel`/`shorts`, descriptions containing "play Short", and rows under a "Shorts" heading | Covered with a "Shorts hidden" box **after 3 s without scrolling or tapping**. Removed the moment you move. Touches go through, so you can scroll past. |
 | Home / Subscriptions feed (if ticked) | That bottom-bar tab is selected **and** there's no back arrow or search box in the top bar **and** no video player on screen. (YouTube keeps Home selected on search results, channels and videos opened from Home.) | Covered straight away by a "Feed blocked" panel that catches touches, so the feed can't be scrolled or tapped. The top bar (Search) and the bottom tabs stay usable. |
@@ -60,6 +60,14 @@ Safety rules for Back, so it can't fight you:
 - On a feed it only presses Back for a Shorts player that fills the screen.
   (On YouTube, Back on Home scrolls to the top and then closes the app.)
 - At most once every 1.2 s.
+- **Landscape:** when the phone is turned sideways the blocker does nothing
+  (Shorts only play upright; Back on a full-screen video would shrink it into
+  the little corner player).
+- **Two looks before Back:** the Shorts view must still be there about 0.2 s
+  after it was first seen, so a screen that only flickers past isn't mistaken.
+- **One Back per Short:** after a Back, no more Backs until the Shorts view has
+  gone away (or 4 s have passed). This stops one Short pushing you back through
+  several screens and out of YouTube.
 - **Loop guard:** after 3 Backs within 10 s it stops pressing Back for 30 s,
   and writes that in *Recent activity*.
 

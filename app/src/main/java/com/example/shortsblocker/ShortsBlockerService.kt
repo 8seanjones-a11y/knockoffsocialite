@@ -47,6 +47,13 @@ class ShortsBlockerService : AccessibilityService() {
          */
         val SHORTS_ID_WORDS = listOf("reel", "shorts")
 
+        /**
+         * ...except these. "reel_time_bar" is a window-sized view that YouTube
+         * keeps on screen on the Home feed and watch page too (seen in debug
+         * mode), so it must never count as "a Short is playing".
+         */
+        val NOT_SHORTS_ID_WORDS = listOf("time_bar")
+
         /** A single Short in a feed is described as "..., 1.2M views - play Short". */
         val SHORTS_ITEM_WORDS = listOf("play short")
 
@@ -112,6 +119,20 @@ class ShortsBlockerService : AccessibilityService() {
         /** Wait at least this long between two Back presses. */
         const val BACK_COOLDOWN_MS = 1200L
 
+        /**
+         * Back is the risky action (if we're wrong it kicks you out of YouTube),
+         * so the Shorts view must still be there this long after we first saw
+         * it. Keep this shorter than SETTLE_MS so the re-check can confirm it.
+         */
+        const val BACK_CONFIRM_MS = 200L
+
+        /**
+         * After a Back we don't press again until the Shorts view has gone away
+         * (so one Short can't cause a chain of Backs that leaves YouTube). If it
+         * never goes away (the first Back only closed a pop-up), try again after this.
+         */
+        const val BACK_RETRY_MS = 4000L
+
         /** Loop guard: this many Backs within the window pauses Back for a while. */
         const val LOOP_MAX_BACKS = 3
         const val LOOP_WINDOW_MS = 10_000L
@@ -140,6 +161,15 @@ class ShortsBlockerService : AccessibilityService() {
     private var knownBarTop = -1
 
     private var lastBackAt = 0L
+
+    /** When we first saw the Shorts view in a row of checks (0 = not seen right now). */
+    private var shortsFirstSeenAt = 0L
+
+    /** True once the Shorts view has been off screen since our last Back press. */
+    private var shortsGoneSinceBack = true
+
+    /** Last error written to Recent activity, so a repeating error is only written once. */
+    private var lastErrorLog = ""
     private val recentBacks = ArrayDeque<Long>()
     private var backPausedUntil = 0L
     private var lastDumpAt = 0L
@@ -197,6 +227,7 @@ class ShortsBlockerService : AccessibilityService() {
     }
 
     private fun hideAll() {
+        shortsFirstSeenAt = 0L  // a new visit to YouTube must be confirmed again
         if (::overlays.isInitialized) overlays.clear()
     }
 
@@ -204,7 +235,24 @@ class ShortsBlockerService : AccessibilityService() {
     // The main check
     // ---------------------------------------------------------------------
 
+    /**
+     * Runs the check, but never lets an unexpected error stop the service.
+     * (Screens change while we read them, so odd errors can happen.) The error
+     * is written to Recent activity so it shows up in Share screen info.
+     */
     private fun refresh(event: AccessibilityEvent?) {
+        try {
+            refreshNow(event)
+        } catch (e: Exception) {
+            val msg = "Error: ${e.javaClass.simpleName}: ${e.message}"
+            Log.w(TAG, msg, e)
+            if (msg != lastErrorLog) Prefs.addLog(this, msg)
+            lastErrorLog = msg
+            hideAll()
+        }
+    }
+
+    private fun refreshNow(event: AccessibilityEvent?) {
         val blocking = Prefs.isBlockingOn(this)
         val debug = Prefs.isDebugOn(this)
 
@@ -224,12 +272,17 @@ class ShortsBlockerService : AccessibilityService() {
         val screen = scan(root, window)
         val blockShorts = Prefs.isBlockShortsOn(this)
 
+        // Shorts only play upright. A phone turned sideways is showing a normal
+        // video full screen, and pressing Back there shrinks it into the little
+        // corner player. So in landscape we do nothing at all.
+        val landscape = window.width() > window.height()
+
         // 1. Shorts player is open -> press Back.
-        val playerReason = if (blockShorts) shortsPlayerReason(screen) else null
+        val playerReason = if (blockShorts && !landscape) shortsPlayerReason(screen) else null
 
         // 2. Everything to cover.
         val still = SystemClock.elapsedRealtime() - lastMoveAt >= STILL_MS
-        val boxes = if (playerReason == null) boxesFor(screen, window, blockShorts, still) else emptyList()
+        val boxes = if (playerReason == null && !landscape) boxesFor(screen, window, blockShorts, still) else emptyList()
 
         if (debug) dumpScreen(root, event, window, screen, playerReason, still, boxes)
         if (!blocking) {
@@ -239,9 +292,19 @@ class ShortsBlockerService : AccessibilityService() {
 
         if (playerReason != null) {
             overlays.clear()
-            pressBack(playerReason)
+            val now = SystemClock.elapsedRealtime()
+            if (shortsFirstSeenAt == 0L) shortsFirstSeenAt = now
+            // Only press Back when (a) the Shorts view is still there on a second
+            // look, and (b) the last Back has had its effect: the Shorts view went
+            // away since then, or enough time passed that it clearly didn't work.
+            val confirmed = now - shortsFirstSeenAt >= BACK_CONFIRM_MS
+            val lastBackDone = shortsGoneSinceBack || now - lastBackAt >= BACK_RETRY_MS
+            if (confirmed && lastBackDone) pressBack(playerReason)
             return
         }
+        // No Shorts view on screen right now.
+        shortsFirstSeenAt = 0L
+        shortsGoneSinceBack = true
 
         overlays.show(boxes)
         logCoverChanges(screen, boxes)
@@ -325,7 +388,7 @@ class ShortsBlockerService : AccessibilityService() {
         }
 
         // Shorts by view ID: big = the player, small = a row/item in a feed.
-        if (containsAny(id, SHORTS_ID_WORDS)) {
+        if (containsAny(id, SHORTS_ID_WORDS) && !containsAny(id, NOT_SHORTS_ID_WORDS)) {
             if (b.width() >= window.width() * MIN_WIDTH_SHARE && b.height() >= window.height() * MIN_HEIGHT_SHARE) {
                 s.shortsPlayerId = id
                 if (b.height() >= window.height() * FULL_PLAYER_HEIGHT_SHARE) s.shortsPlayerFullHeight = true
@@ -472,6 +535,8 @@ class ShortsBlockerService : AccessibilityService() {
 
         recentBacks.addLast(now)
         lastBackAt = now
+        shortsGoneSinceBack = false  // no more Backs until this one has worked
+        shortsFirstSeenAt = 0L
         performGlobalAction(GLOBAL_ACTION_BACK)
         Log.i(TAG, "Pressed Back ($reason)")
         Prefs.addLog(this, "Pressed Back: $reason")
@@ -551,6 +616,7 @@ class ShortsBlockerService : AccessibilityService() {
             .append(" (event: ").append(event?.let { AccessibilityEvent.eventTypeToString(it.eventType) } ?: "timer")
             .append(")\n")
         out.append("window=").append(window.toShortString())
+            .append(" landscape=").append(window.width() > window.height())
             .append(" homeSelected=").append(s.homeSelected)
             .append(" subsSelected=").append(s.subsSelected)
             .append(" back=").append(s.hasBackButton)

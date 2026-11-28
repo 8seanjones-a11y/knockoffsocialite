@@ -51,3 +51,4 @@ The service config `res/xml/accessibility_service_config.xml` deliberately has *
 - **Pressing Back on the Home feed.** It scrolls to the top or closes YouTube.
 - **Redirecting Home by tapping the Subscriptions tab.** The user rejected it, and it fired on pages opened from Home.
 - **Matching `player`/`watch` IDs without size and position limits.** YouTube's whole-screen layout matches them, so the feed was never detected.
+- **Treating every big `reel*` view as the Shorts player.** `reel_time_bar` is a window-sized view that stays on the Home feed and watch page, so it caused endless Backs (minimising videos, leaving YouTube) and stopped the Home cover (Back wins over covering). It is listed in `NOT_SHORTS_ID_WORDS`. If another `reel*` view shows the same pattern, add it there after checking a Share screen info dump.
